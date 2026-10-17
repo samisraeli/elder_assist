@@ -18,40 +18,85 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
+import kotlinx.coroutines.delay
 import java.time.*
+import java.time.format.DateTimeFormatter
 
 private val Blue = Color(0xFF245AA5)
+private val ListeningGreen = Color(0xFF1F8F4E)
+private val AssistantFont = FontFamily(
+    Font(R.font.assistant, FontWeight.Normal),
+    Font(R.font.assistant, FontWeight.Medium),
+    Font(R.font.assistant, FontWeight.SemiBold),
+    Font(R.font.assistant, FontWeight.Bold)
+)
+private val clockFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
 enum class SettingsArea(val label: String) {
-    PROFILE("שם, כתובת ומיקום"), VOICE("שפה, קול וגודל גופן"), PEOPLE("אנשי קשר וימי הולדת"),
-    MEDICATIONS("תרופות לפי חלקי היום"), CALENDAR("יומן Google והתראות"), SOURCES("אתרי חדשות וספורט"), BACKUP("גיבוי והעברה")
+    FEATURES("פיצ׳רים פעילים"),
+    PROFILE("שם, כתובת ומיקום"),
+    VOICE("שפה, קול וגודל גופן"),
+    PEOPLE("אנשי קשר וימי הולדת"),
+    MEDICATIONS("תרופות לפי חלקי היום"),
+    CALENDAR("יומן Google והתראות"),
+    SOURCES("אתרי חדשות וספורט"),
+    BACKUP("גיבוי והעברה")
 }
+
 @Composable fun CompanionTheme(p: Profile, content: @Composable () -> Unit) {
     val density = LocalDensity.current
     val colors = if(p.dark) darkColorScheme(primary=Color(0xFFA7C8FF),background=Color(0xFF101B2B),surface=Color(0xFF19283C),onSurface=Color(0xFFF2F5FA))
         else lightColorScheme(primary=Blue,background=Color(0xFFF4F7FB),surface=Color.White,onSurface=Color(0xFF172B46))
-    val type = Typography(bodyLarge=TextStyle(fontSize=22.sp,lineHeight=32.sp),bodyMedium=TextStyle(fontSize=20.sp,lineHeight=29.sp),
-        titleLarge=TextStyle(fontSize=28.sp,lineHeight=36.sp,fontWeight=FontWeight.Bold),headlineMedium=TextStyle(fontSize=32.sp,lineHeight=42.sp,fontWeight=FontWeight.Bold),
-        labelLarge=TextStyle(fontSize=22.sp,lineHeight=30.sp,fontWeight=FontWeight.SemiBold))
+    val type = Typography(
+        bodyLarge=TextStyle(fontFamily=AssistantFont,fontSize=21.sp,lineHeight=30.sp),
+        bodyMedium=TextStyle(fontFamily=AssistantFont,fontSize=18.sp,lineHeight=26.sp),
+        titleLarge=TextStyle(fontFamily=AssistantFont,fontSize=24.sp,lineHeight=32.sp,fontWeight=FontWeight.Bold),
+        headlineMedium=TextStyle(fontFamily=AssistantFont,fontSize=28.sp,lineHeight=36.sp,fontWeight=FontWeight.Bold),
+        labelLarge=TextStyle(fontFamily=AssistantFont,fontSize=20.sp,lineHeight=26.sp,fontWeight=FontWeight.SemiBold)
+    )
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl,
         LocalDensity provides Density(density.density,density.fontScale * p.fontScale)) {
         MaterialTheme(colorScheme=colors,typography=type,content=content)
     }
 }
 
-@Composable fun Action(text: String, icon: ImageVector? = null, enabled: Boolean = true, secondary: Boolean = false, onClick: () -> Unit) {
+@Composable fun Action(text: String, icon: ImageVector? = null, enabled: Boolean = true, secondary: Boolean = false, active: Boolean = false, onClick: () -> Unit) {
     val body: @Composable RowScope.() -> Unit = {
-        if(icon != null) { Icon(icon,null,Modifier.size(28.dp)); Spacer(Modifier.width(12.dp)) }
+        if(icon != null) { Icon(icon,null,Modifier.size(24.dp)); Spacer(Modifier.width(10.dp)) }
         Text(text,Modifier.weight(1f),style=MaterialTheme.typography.labelLarge)
     }
-    if(secondary) OutlinedButton(onClick,Modifier.fillMaxWidth().heightIn(min=64.dp),enabled=enabled,shape=RoundedCornerShape(18.dp),contentPadding=PaddingValues(16.dp),content=body)
-    else Button(onClick,Modifier.fillMaxWidth().heightIn(min=64.dp),enabled=enabled,shape=RoundedCornerShape(18.dp),contentPadding=PaddingValues(16.dp),content=body)
+    if (active) {
+        Button(onClick,Modifier.fillMaxWidth().heightIn(min=58.dp),enabled=enabled,shape=RoundedCornerShape(16.dp),
+            colors=ButtonDefaults.buttonColors(containerColor=ListeningGreen,contentColor=Color.White),contentPadding=PaddingValues(14.dp),content=body)
+    } else if(secondary) {
+        OutlinedButton(onClick,Modifier.fillMaxWidth().heightIn(min=58.dp),enabled=enabled,shape=RoundedCornerShape(16.dp),contentPadding=PaddingValues(14.dp),content=body)
+    } else {
+        Button(onClick,Modifier.fillMaxWidth().heightIn(min=58.dp),enabled=enabled,shape=RoundedCornerShape(16.dp),contentPadding=PaddingValues(14.dp),content=body)
+    }
 }
+
+@Composable private fun HomeTile(text: String, icon: ImageVector, primary: Boolean = false, enabled: Boolean = true, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val body: @Composable RowScope.() -> Unit = {
+        Icon(icon,null,Modifier.size(24.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(text,style=MaterialTheme.typography.labelLarge,maxLines=1)
+    }
+    if (primary) {
+        Button(onClick,modifier.heightIn(min=56.dp),enabled=enabled,shape=RoundedCornerShape(16.dp),contentPadding=PaddingValues(horizontal=12.dp,vertical=10.dp),content=body)
+    } else {
+        OutlinedButton(onClick,modifier.heightIn(min=56.dp),enabled=enabled,shape=RoundedCornerShape(16.dp),contentPadding=PaddingValues(horizontal=12.dp,vertical=10.dp),content=body)
+    }
+}
+
 @Composable private fun Panel(content: @Composable ColumnScope.() -> Unit) {
-    Card(Modifier.fillMaxWidth(),shape=RoundedCornerShape(24.dp),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(14.dp),content=content)
+    Card(Modifier.fillMaxWidth(),shape=RoundedCornerShape(20.dp),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp),content=content)
     }
 }
 @Composable private fun Heading(text: String) { Text(text,style=MaterialTheme.typography.titleLarge) }
@@ -61,69 +106,155 @@ enum class SettingsArea(val label: String) {
 
 @Composable fun CompanionUi(
     m: CompanionModel, p: Profile, speech: DeviceSpeech, listen: () -> Unit, stop: () -> Unit,
+    requestContacts: () -> Unit = {},
     requestCalendar: () -> Unit, requestNotifications: () -> Unit, requestExact: () -> Unit, appSettings: () -> Unit,
     importFile: () -> Unit, exportFile: () -> Unit, restoreFile: () -> Unit, openUrl: (String) -> Unit
 ) {
     val people by m.people.collectAsState(); val reminders by m.reminders.collectAsState(); val sources by m.sources.collectAsState()
     val medications by m.medications.collectAsState()
     var showPerson by remember { mutableStateOf(false) }; var editingPerson by remember { mutableStateOf<Person?>(null) }
+    var personOnlyBirthday by remember { mutableStateOf(false) }
+    var peopleTab by remember { mutableStateOf(0) }
+    var callFilter by remember { mutableStateOf("") }
     var showReminder by remember { mutableStateOf(false) }; var showPaste by remember { mutableStateOf(false) }
     var showSource by remember { mutableStateOf(false) }; var familyGate by remember { mutableStateOf(false) }
     var settingsArea by remember { mutableStateOf<SettingsArea?>(null) }
     var showMedication by remember { mutableStateOf(false) }; var editingMedication by remember { mutableStateOf<Medication?>(null) }
-    val pageScroll=rememberScrollState()
+    val pageScroll = rememberScrollState()
+    var nowTime by remember { mutableStateOf(ZonedDateTime.now(ZoneId.of(p.zone))) }
+    LaunchedEffect(p.zone) {
+        while(true) {
+            nowTime = ZonedDateTime.now(ZoneId.of(p.zone))
+            delay(15000)
+        }
+    }
     LaunchedEffect(m.screen,settingsArea) { pageScroll.scrollTo(0) }
+    val canStop = m.listening || speech.speaking || m.busy
     Scaffold(containerColor=MaterialTheme.colorScheme.background,
         topBar = {
-            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal=20.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal=16.dp,vertical=8.dp),verticalAlignment=Alignment.CenterVertically) {
                 BoxWithConstraints(Modifier.weight(1f)) {
                     val measurer=rememberTextMeasurer(); val width=with(LocalDensity.current) { maxWidth.roundToPx() }
                     val label="עזרה - העוזר האישי שלך"
-                    val size=(22 downTo 8).firstOrNull { measurer.measure(label,TextStyle(fontSize=it.sp,fontWeight=FontWeight.Bold)).size.width <= width } ?: 8
-                    Text(label,fontSize=size.sp,fontWeight=FontWeight.Bold,maxLines=1,softWrap=false)
+                    val size=(22 downTo 8).firstOrNull { measurer.measure(label,TextStyle(fontFamily=AssistantFont,fontSize=it.sp,fontWeight=FontWeight.Bold)).size.width <= width } ?: 8
+                    Text(label,fontFamily=AssistantFont,fontSize=size.sp,fontWeight=FontWeight.Bold,maxLines=1,softWrap=false)
                 }
-                IconButton({ settingsArea=null; familyGate = true },Modifier.size(64.dp)) { Icon(Icons.Default.Settings,"הגדרות למשפחה",Modifier.size(30.dp)) }
+                IconButton({ settingsArea=null; familyGate = true },Modifier.size(52.dp)) { Icon(Icons.Default.Settings,"הגדרות למשפחה",Modifier.size(28.dp)) }
             }
         }, bottomBar = {
             Surface(shadowElevation=8.dp) {
-                Row(Modifier.navigationBarsPadding().padding(12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton({ m.navigate(Screen.HOME) },Modifier.weight(1f).heightIn(min=64.dp)) { Icon(Icons.Default.Home,null); Spacer(Modifier.width(6.dp)); Text("בית") }
-                    Button(stop,Modifier.weight(1f).heightIn(min=64.dp),colors=ButtonDefaults.buttonColors(containerColor=MaterialTheme.colorScheme.errorContainer,contentColor=MaterialTheme.colorScheme.onErrorContainer)) {
-                        Icon(Icons.Default.Stop,null); Spacer(Modifier.width(6.dp)); Text("עצור")
+                Row(
+                    Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal=20.dp,vertical=10.dp),
+                    horizontalArrangement=Arrangement.spacedBy(16.dp),
+                    verticalAlignment=Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = { m.navigate(Screen.HOME) },
+                        modifier = Modifier.weight(1f).height(56.dp),
+                        shape = RoundedCornerShape(18.dp)
+                    ) {
+                        Icon(Icons.Default.Home, contentDescription = "בית", modifier = Modifier.size(30.dp))
+                    }
+                    if (canStop) {
+                        Button(
+                            onClick = stop,
+                            modifier = Modifier.weight(1f).height(56.dp),
+                            shape = RoundedCornerShape(18.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = "עצור", modifier = Modifier.size(30.dp))
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = stop,
+                            enabled = false,
+                            modifier = Modifier.weight(1f).height(56.dp),
+                            shape = RoundedCornerShape(18.dp)
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = "עצור", modifier = Modifier.size(30.dp))
+                        }
                     }
                 }
             }
         }
     ) { padding ->
-        Column(Modifier.padding(padding).verticalScroll(pageScroll).padding(20.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
-            Text(m.status,Modifier.semantics { liveRegion = LiveRegionMode.Polite },color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.bodyMedium)
+        Column(Modifier.padding(padding).verticalScroll(pageScroll).padding(horizontal=18.dp,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
+            if (m.listening || m.busy || speech.speaking || (m.status.isNotBlank() && m.status != "מוכן להקשיב" && m.status != "הפעולה בוטלה")) {
+                Text(
+                    m.status,
+                    Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    color = if (m.listening) ListeningGreen else MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
             if(m.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             when(m.screen) {
                 Screen.HOME -> {
                     Text(if(p.name.isBlank()) "שלום, טוב שבאת" else "שלום, ${p.name}",style=MaterialTheme.typography.headlineMedium)
-                    Text(LocalDate.now(ZoneId.of(p.zone)).format(displayDate))
-                    if(p.name.isBlank()) Panel { Text("בן משפחה יכול להתחיל בהגדרת השם, העיר ואנשי הקשר."); Action("הגדרה ראשונה",Icons.Default.Settings) { familyGate=true } }
-                    BoxWithConstraints(Modifier.fillMaxWidth(),contentAlignment=Alignment.Center) {
-                    val diameter=minOf(maxWidth,(208f*maxOf(1f,LocalDensity.current.fontScale/1.15f)).dp)
-                    Button(listen,Modifier.size(diameter),enabled=!m.busy,shape=CircleShape,contentPadding=PaddingValues(12.dp)) {
-                        Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(10.dp)) {
-                            Icon(Icons.Default.Mic,null,Modifier.size(52.dp)); Text("דבר איתי",style=MaterialTheme.typography.titleLarge)
+                    Text("${nowTime.toLocalDate().format(displayDate)} · ${nowTime.toLocalTime().format(clockFormat)}",style=MaterialTheme.typography.bodyMedium)
+                    if(p.name.isBlank()) Panel { Text("בן משפחה יכול להתחיל בהגדרת השם והפיצ׳רים הפעילים."); Action("הגדרה ראשונה",Icons.Default.Settings) { familyGate=true } }
+                    Column(Modifier.fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                        val diameter = 112.dp
+                        Button(
+                            onClick = listen,
+                            modifier = Modifier.size(diameter),
+                            enabled = !m.busy,
+                            shape = CircleShape,
+                            colors = if (m.listening) ButtonDefaults.buttonColors(containerColor = ListeningGreen, contentColor = Color.White)
+                                     else ButtonDefaults.buttonColors(),
+                            contentPadding = PaddingValues(8.dp)
+                        ) {
+                            Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
+                                Icon(Icons.Default.Mic,null,Modifier.size(32.dp))
+                                Spacer(Modifier.height(4.dp))
+                                Text(if (m.listening) "מקשיב..." else "דבר איתי",fontSize=18.sp,fontWeight=FontWeight.Bold,textAlign=TextAlign.Center)
+                            }
+                        }
+                        Text(
+                            if (m.listening) "דברו עכשיו – לחצו שוב לעצירה" else "לחצו ואמרו מה תרצו",
+                            color = if (m.listening) ListeningGreen else MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+
+                    data class HomeItem(val title: String, val icon: ImageVector, val primary: Boolean = false, val enabled: Boolean = true, val onClick: () -> Unit)
+                    val items = buildList {
+                        if (p.enableCalls) add(HomeItem("התקשרות", Icons.Default.Call, primary = !p.enableMorning) { m.navigate(Screen.CALLS) })
+                        if (p.enableMorning) add(HomeItem("הבוקר שלי", Icons.Default.WbSunny, primary = true, enabled = !m.busy) { m.morning() })
+                        if (p.enableNews && sources.isNotEmpty()) add(HomeItem("חדשות", Icons.Default.Newspaper) { m.navigate(Screen.NEWS) })
+                        if (p.enableAgenda || p.enableBirthdays) add(HomeItem("מה קרוב", Icons.Default.Event) { m.navigate(Screen.AGENDA) })
+                        if (p.enableMedications) add(HomeItem("התרופות שלי", Icons.Default.Medication) { m.navigate(Screen.MEDICATIONS) })
+                        if (p.enableWeather) add(HomeItem("מזג האוויר", Icons.Default.Cloud, enabled = !m.busy) { m.getWeather() })
+                    }
+                    items.chunked(2).forEach { rowItems ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            rowItems.forEach { item ->
+                                HomeTile(item.title, item.icon, primary = item.primary, enabled = item.enabled, modifier = Modifier.weight(1f), onClick = item.onClick)
+                            }
+                            if (rowItems.size == 1) Spacer(Modifier.weight(1f))
                         }
                     }
-                    }
-                    Text("לחצו ואמרו מה תרצו",Modifier.align(Alignment.CenterHorizontally),style=MaterialTheme.typography.bodyMedium)
-                    Action("הבוקר שלי",Icons.Default.WbSunny,enabled=!m.busy) { m.morning() }
-                    Action("חדשות",Icons.Default.Newspaper,secondary=true) { m.navigate(Screen.NEWS) }
-                    Action("התקשרות",Icons.Default.Call,secondary=true) { m.navigate(Screen.CALLS) }
-                    Action("מה קרוב",Icons.Default.Event,secondary=true) { m.navigate(Screen.AGENDA) }
-                    Action("התרופות שלי",Icons.Default.Medication,secondary=true) { m.navigate(Screen.MEDICATIONS) }
-                    Action("מזג האוויר",Icons.Default.Cloud,secondary=true,enabled=!m.busy) { m.getWeather() }
-                    if(m.transcript.isNotBlank()) Panel { Text("אמרת",fontWeight=FontWeight.Bold); Text(m.transcript) }
+                    if(m.transcript.isNotBlank()) Panel { Text("אמרת: ${m.transcript}",fontWeight=FontWeight.SemiBold) }
                 }
                 Screen.NEWS -> {
                     Heading("מה חדש היום?")
-                    Topic.entries.forEach { t -> Action(t.label,Icons.Default.Newspaper,secondary=m.topic!=t,enabled=!m.busy) { m.loadNews(t) } }
-                    if(m.newsResult == null && !m.busy) Text("בחרו תחום כדי לטעון חדשות מהמקורות שהוגדרו במשפחה.")
+                    val activeTopics = Topic.entries.filter { t -> sources.any { it.topic == t.name } }
+                    if (activeTopics.isEmpty()) {
+                        Panel {
+                            Text("טרם הוגדרו אתרי חדשות. אפשר להוסיף בהגדרות המשפחה ← אתרי חדשות וספורט.")
+                        }
+                    } else {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            activeTopics.forEach { t ->
+                                HomeTile(t.label, Icons.Default.Newspaper, primary = m.topic == t, enabled = !m.busy, modifier = Modifier.weight(1f)) { m.loadNews(t) }
+                            }
+                        }
+                        if(m.newsResult == null && !m.busy) Text("בחרו תחום כדי לטעון חדשות.")
+                    }
                     m.newsResult?.let { result ->
                         Text("עודכן ${result.fetched.atZone(ZoneId.of(p.zone)).format(displayTime)}",style=MaterialTheme.typography.bodyMedium)
                         result.warnings.forEach { Text(it,color=MaterialTheme.colorScheme.error) }
@@ -138,10 +269,9 @@ enum class SettingsArea(val label: String) {
                 }
                 Screen.AGENDA -> {
                     Heading("היום ובשבוע הקרוב")
-                    Text("כולל היום וששת הימים שאחריו")
                     Action("הקראת האירועים",Icons.AutoMirrored.Filled.VolumeUp) { m.loadAgenda(true) }
                     Action("הוספת תזכורת",Icons.Default.Add,secondary=true) { showReminder=true }
-                    if(m.agenda.isEmpty()) Panel { Text("אין אירועים בטווח זה. ניתן להוסיף ימי הולדת ולחבר יומן בהגדרות.") }
+                    if(m.agenda.isEmpty()) Panel { Text("אין אירועים קרובים.") }
                     m.agenda.forEach { item -> Panel {
                         Text(item.kind,color=MaterialTheme.colorScheme.primary); Heading(item.title)
                         Text(item.time.toLocalDate().format(displayDate)); if(!item.allDay) Text(item.time.toLocalTime().toString())
@@ -152,16 +282,35 @@ enum class SettingsArea(val label: String) {
                 }
                 Screen.CALLS -> {
                     Heading("למי להתקשר?")
-                    Text("אפשר לומר: התקשר לשלום")
-                    Action("חיפוש בקול",Icons.Default.Mic,enabled=!m.busy,onClick=listen)
-                    if(people.isEmpty()) Text("אין עדיין אנשי קשר. אפשר להוסיף בהגדרות המשפחה.")
-                    (m.callChoices.ifEmpty { people }).forEach { person ->
-                        Action("${person.name}\n${person.phone.ifBlank { "לא הוגדר מספר" }}",Icons.Default.Call,secondary=true) { m.requestCall(person) }
+                    Action(
+                        text = if (m.listening) "מקשיב לשם איש הקשר... (לחצו לעצירה)" else "חיפוש בקול (אמרו שם או התקשר ל...)",
+                        icon = Icons.Default.Mic,
+                        enabled = !m.busy,
+                        active = m.listening,
+                        onClick = listen
+                    )
+                    if (p.enablePhoneContacts && !m.deviceContacts.allowed()) {
+                        Action("אישור גישה לאנשי הקשר בטלפון", Icons.Default.Contacts, secondary = true, onClick = requestContacts)
+                    }
+                    Field(callFilter, "חיפוש לפי שם") { callFilter = it; m.callChoices = emptyList() }
+                    val allCallable = m.allCallablePeople()
+                    val filtered = if (m.callChoices.isNotEmpty()) m.callChoices else if (callFilter.isBlank()) allCallable else {
+                        val q = normalized(callFilter)
+                        allCallable.filter { person ->
+                            (listOf(person.name) + person.aliases.split(',', ';')).any { normalized(it).contains(q) } || person.phone.contains(q)
+                        }
+                    }
+                    if(allCallable.isEmpty()) {
+                        Text("אין עדיין אנשי קשר. אשרו גישה לאנשי הקשר בטלפון או הוסיפו בהגדרות המשפחה.")
+                    } else if (filtered.isEmpty()) {
+                        Text("לא נמצא איש קשר תואם.")
+                    }
+                    filtered.take(30).forEach { person ->
+                        Action("${person.name} · ${person.phone}",Icons.Default.Call,secondary=true) { m.requestCall(person) }
                     }
                 }
                 Screen.MEDICATIONS -> {
                     Heading("התרופות שלי")
-                    Text("לפי הרשימה והשעות שהוגדרו במשפחה")
                     Action("הקראת הרשימה",Icons.AutoMirrored.Filled.VolumeUp) { m.respond(m.medicationText()) }
                     if(medications.none { it.enabled }) Text("עדיין לא הוגדרו תרופות. היכנסו להגדרות למשפחה ← תרופות לפי חלקי היום.")
                     DayPart.entries.forEach { part ->
@@ -175,90 +324,182 @@ enum class SettingsArea(val label: String) {
                 Screen.SETTINGS -> {
                     Heading("הגדרות למשפחה")
                     if(settingsArea==null) {
-                        Text("בחרו מה להגדיר. לכל נושא מסך משלו.")
-                        SettingsArea.entries.forEach { area -> Action(area.label,Icons.Default.ChevronLeft,secondary=true) { settingsArea=area } }
+                        Text("בחרו מה להגדיר:")
+                        SettingsArea.entries.forEach { area -> Action(area.label,Icons.Default.ChevronLeft,secondary=area!=SettingsArea.FEATURES) { settingsArea=area } }
                     } else {
-                    Action("חזרה לתפריט ההגדרות",Icons.Default.ArrowForward,secondary=true) { settingsArea=null }
-                    if(settingsArea in listOf(SettingsArea.PROFILE,SettingsArea.VOICE,SettingsArea.CALENDAR))
-                        SettingsForm(m,p,speech,settingsArea!!,requestCalendar,requestNotifications,requestExact,appSettings)
-                    if(settingsArea==SettingsArea.PEOPLE) Panel {
-                        Heading("אנשי קשר וימי הולדת")
-                        Action("הוספת איש קשר",Icons.Default.PersonAdd) { editingPerson=null; showPerson=true }
-                        Action("יבוא קובץ Excel",Icons.Default.UploadFile,secondary=true,onClick=importFile)
-                        Action("הדבקת טבלה",Icons.Default.ContentPaste,secondary=true) { showPaste=true }
-                        Text("כותרות: שם, כינוי, טלפון, תאריך לידה. תאריכים: יום/חודש או יום/חודש/שנה. שמרו טלפונים כטקסט ב־Excel.",style=MaterialTheme.typography.bodyMedium)
-                        people.forEach { person ->
-                            HorizontalDivider(); Text(person.name,fontWeight=FontWeight.Bold); Text(person.phone)
-                            Action("עריכה",Icons.Default.Edit,secondary=true) { editingPerson=person; showPerson=true }
-                            Action("מחיקה",Icons.Default.Delete,secondary=true) { m.deletePerson(person) }
+                        Action("חזרה לתפריט ההגדרות",Icons.Default.ArrowForward,secondary=true) { settingsArea=null }
+                        if(settingsArea in listOf(SettingsArea.FEATURES,SettingsArea.PROFILE,SettingsArea.VOICE,SettingsArea.CALENDAR))
+                            SettingsForm(m,p,speech,settingsArea!!,requestContacts,requestCalendar,requestNotifications,requestExact,appSettings)
+                        if(settingsArea==SettingsArea.PEOPLE) Panel {
+                            Heading("אנשי קשר וימי הולדת")
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                HomeTile("אנשי קשר", Icons.Default.Call, primary = peopleTab == 0, modifier = Modifier.weight(1f)) { peopleTab = 0 }
+                                HomeTile("ימי הולדת", Icons.Default.Cake, primary = peopleTab == 1, modifier = Modifier.weight(1f)) { peopleTab = 1 }
+                            }
+                            if (peopleTab == 0) {
+                                if (!m.deviceContacts.allowed()) {
+                                    Action("חיבור אנשי קשר מהטלפון", Icons.Default.Contacts, onClick = requestContacts)
+                                } else {
+                                    Text("מחובר לאנשי הקשר בטלפון (${m.phonePeople.size} אנשי קשר)", color = ListeningGreen, fontWeight = FontWeight.SemiBold)
+                                }
+                                Action("הוספת איש קשר ידנית",Icons.Default.PersonAdd,secondary=true) { editingPerson=null; personOnlyBirthday=false; showPerson=true }
+                                val contactPeople = people.filter { it.phone.isNotBlank() }
+                                contactPeople.forEach { person ->
+                                    HorizontalDivider()
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(person.name,fontWeight=FontWeight.Bold)
+                                            Text(person.phone,style=MaterialTheme.typography.bodyMedium)
+                                        }
+                                        Row {
+                                            IconButton({ editingPerson=person; personOnlyBirthday=false; showPerson=true }) { Icon(Icons.Default.Edit,"עריכה") }
+                                            IconButton({ m.deletePerson(person) }) { Icon(Icons.Default.Delete,"מחיקה") }
+                                        }
+                                    }
+                                }
+                            } else {
+                                Action("הוספת יום הולדת",Icons.Default.Cake) { editingPerson=null; personOnlyBirthday=true; showPerson=true }
+                                Action("יבוא קובץ Excel",Icons.Default.UploadFile,secondary=true,onClick=importFile)
+                                Action("הדבקת טבלה",Icons.Default.ContentPaste,secondary=true) { showPaste=true }
+                                Text("ליבוא ימי הולדת נדרשות רק עמודות שם ותאריך לידה (יום/חודש או יום/חודש/שנה). רשומות ללא טלפון יישמרו כימי הולדת בלבד ולא יופיעו בחיוג.",style=MaterialTheme.typography.bodyMedium)
+                                val birthdayPeople = people.filter { it.birthDay != null && it.birthMonth != null }
+                                if (birthdayPeople.isEmpty()) Text("טרם נוספו ימי הולדת.")
+                                birthdayPeople.forEach { person ->
+                                    HorizontalDivider()
+                                    val bStr = "${person.birthDay}/${person.birthMonth}" + (person.birthYear?.let { "/$it" } ?: "")
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(person.name,fontWeight=FontWeight.Bold)
+                                            Text("תאריך לידה: $bStr",style=MaterialTheme.typography.bodyMedium)
+                                        }
+                                        Row {
+                                            IconButton({ editingPerson=person; personOnlyBirthday=person.phone.isBlank(); showPerson=true }) { Icon(Icons.Default.Edit,"עריכה") }
+                                            IconButton({ m.deletePerson(person) }) { Icon(Icons.Default.Delete,"מחיקה") }
+                                        }
+                                    }
+                                }
+                            }
                         }
-                    }
-                    if(settingsArea==SettingsArea.MEDICATIONS) Panel {
-                        Heading("תרופות לפי חלקי היום")
-                        Text("הזינו את שם התרופה, ההנחיות שנקבעו לכם והשעה בכל חלק יום. התזכורות יומיות; האפליקציה אינה קובעת מינון.")
-                        Action("הוספת תרופה",Icons.Default.Add) { editingMedication=null; showMedication=true }
-                        medications.forEach { med ->
-                            HorizontalDivider(); Heading(med.name)
-                            if(med.instructions.isNotBlank()) Text(med.instructions)
-                            MedicationSchedule.decode(med.slots).forEach { Text("${it.part.label}: ${it.time}") }
-                            Text(if(med.enabled) "התזכורות פעילות" else "התזכורות מושהות")
-                            Action("עריכת התרופה",Icons.Default.Edit,secondary=true) { editingMedication=med;showMedication=true }
-                            Action("הסרת התרופה",Icons.Default.Delete,secondary=true) {m.deleteMedication(med)}
+                        if(settingsArea==SettingsArea.MEDICATIONS) Panel {
+                            Heading("תרופות לפי חלקי היום")
+                            Text("הזינו את שם התרופה, ההנחיות שנקבעו לכם והשעה בכל חלק יום.")
+                            Action("הוספת תרופה",Icons.Default.Add) { editingMedication=null; showMedication=true }
+                            medications.forEach { med ->
+                                HorizontalDivider(); Heading(med.name)
+                                if(med.instructions.isNotBlank()) Text(med.instructions)
+                                MedicationSchedule.decode(med.slots).forEach { Text("${it.part.label}: ${it.time}") }
+                                Text(if(med.enabled) "התזכורות פעילות" else "התזכורות מושהות")
+                                Action("עריכת התרופה",Icons.Default.Edit,secondary=true) { editingMedication=med;showMedication=true }
+                                Action("הסרת התרופה",Icons.Default.Delete,secondary=true) {m.deleteMedication(med)}
+                            }
+                            Action("אישור התראות",Icons.Default.Notifications,secondary=true,onClick=requestNotifications)
+                            Action("הרשאת תזמון מדויק",Icons.Default.Alarm,secondary=true,onClick=requestExact)
                         }
-                        Action("אישור התראות",Icons.Default.Notifications,secondary=true,onClick=requestNotifications)
-                        Action("הרשאת תזמון מדויק",Icons.Default.Alarm,secondary=true,onClick=requestExact)
-                    }
-                    if(settingsArea==SettingsArea.SOURCES) Panel {
-                        Heading("מקורות חדשות")
-                        Text("הוסיפו קישור HTTPS להזנת RSS או Atom. הקישור ייבדק לפני שמירה.")
-                        Action("הוספת מקור",Icons.Default.Add) { showSource=true }
-                        sources.forEach { source ->
-                            Text("${source.name} · ${Topic.valueOf(source.topic).label}"); Text(source.url,style=MaterialTheme.typography.bodyMedium)
-                            Action("הסרת מקור",Icons.Default.Delete,secondary=true) { m.deleteSource(source) }
+                        if(settingsArea==SettingsArea.SOURCES) Panel {
+                            Heading("מקורות חדשות")
+                            Text("הוסיפו קישור HTTPS להזנת RSS או Atom. רק תחומים שיש להם מקור יוצגו במסך החדשות.")
+                            Action("הוספת מקור",Icons.Default.Add) { showSource=true }
+                            sources.forEach { source ->
+                                Text("${source.name} · ${Topic.valueOf(source.topic).label}"); Text(source.url,style=MaterialTheme.typography.bodyMedium)
+                                Action("הסרת מקור",Icons.Default.Delete,secondary=true) { m.deleteSource(source) }
+                            }
                         }
-                    }
-                    if(settingsArea==SettingsArea.BACKUP) Panel {
-                        Heading("גיבוי והעברה")
-                        Text("גיבוי אישי כולל שמות, טלפונים, תאריכים והגדרות. הקובץ אינו מוצפן; שמרו אותו במקום פרטי.")
-                        Action("שמירת גיבוי",Icons.Default.Save,secondary=true,onClick=exportFile)
-                        Action("שחזור מגיבוי",Icons.Default.Restore,secondary=true,onClick=restoreFile)
-                    }
+                        if(settingsArea==SettingsArea.BACKUP) Panel {
+                            Heading("גיבוי והעברה")
+                            Text("גיבוי אישי כולל שמות, טלפונים, תאריכים והגדרות.")
+                            Action("שמירת גיבוי",Icons.Default.Save,secondary=true,onClick=exportFile)
+                            Action("שחזור מגיבוי",Icons.Default.Restore,secondary=true,onClick=restoreFile)
+                        }
                     }
                 }
             }
             if(m.answer.isNotBlank()) Panel {
-                Heading("התשובה שלי"); Text(m.answer,Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                Action("הקראה שוב",Icons.AutoMirrored.Filled.VolumeUp) { speech.say(m.answer,p) }
-                Action("המשך הקראה",Icons.Default.PlayArrow,secondary=true) { speech.resume() }
+                Heading("התשובה שלי")
+                Text(m.answer,Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                if (m.spokenAnswer) {
+                    Action("הקראה שוב",Icons.AutoMirrored.Filled.VolumeUp) { speech.say(m.answer,p) }
+                }
             }
-            Text("מזג אוויר: Open-Meteo · CC BY 4.0",style=MaterialTheme.typography.bodyMedium)
         }
     }
-    if(familyGate) AlertDialog(onDismissRequest={familyGate=false},title={Heading("הגדרות למשפחה")},text={Text("כאן מנהלים את פרטי המשתמש, אנשי הקשר והחיבורים.")},
-        confirmButton={ TextButton({familyGate=false; settingsArea=null; m.navigate(Screen.SETTINGS)},Modifier.heightIn(min=64.dp)) { Text("כניסה להגדרות") } },
-        dismissButton={ TextButton({familyGate=false},Modifier.heightIn(min=64.dp)) { Text("חזרה") } })
-    m.confirmation?.let { pending -> AlertDialog(onDismissRequest={m.cancel()},title={Heading("אישור פעולה")},text={ Column(verticalArrangement=Arrangement.spacedBy(16.dp)) {
-        Text(pending.text); Action("לענות בקול",Icons.Default.Mic,onClick=listen)
-    } },confirmButton={ TextButton({m.confirm()},Modifier.heightIn(min=64.dp),enabled=!m.busy) { Text("כן, אישור") } },dismissButton={TextButton({m.cancel()},Modifier.heightIn(min=64.dp)) {Text("ביטול")} }) }
-    if(showPerson) PersonDialog(editingPerson,onDismiss={showPerson=false},onSave={m.savePerson(it);showPerson=false})
+    if(familyGate) AlertDialog(onDismissRequest={familyGate=false},title={Heading("הגדרות למשפחה")},text={Text("כאן מנהלים את הפיצ׳רים הפעילים, פרטי המשתמש ואנשי הקשר.")},
+        confirmButton={ TextButton({familyGate=false; settingsArea=null; m.navigate(Screen.SETTINGS)},Modifier.heightIn(min=56.dp)) { Text("כניסה להגדרות") } },
+        dismissButton={ TextButton({familyGate=false},Modifier.heightIn(min=56.dp)) { Text("חזרה") } })
+    m.confirmation?.let { pending -> AlertDialog(onDismissRequest={m.cancel()},title={Heading("אישור פעולה")},text={ Column(verticalArrangement=Arrangement.spacedBy(14.dp)) {
+        Text(pending.text)
+        Action(if (m.listening) "מקשיב לתשובה..." else "לענות בקול (כן / לא)",Icons.Default.Mic,active=m.listening,onClick=listen)
+    } },confirmButton={ TextButton({m.confirm()},Modifier.heightIn(min=56.dp),enabled=!m.busy) { Text("כן, אישור") } },dismissButton={TextButton({m.cancel()},Modifier.heightIn(min=56.dp)) {Text("ביטול")} }) }
+    if(showPerson) PersonDialog(editingPerson,onlyBirthday=personOnlyBirthday,onDismiss={showPerson=false},onSave={m.savePerson(it);showPerson=false})
     if(showReminder) ReminderDialog(p,onDismiss={showReminder=false},onSave={title,at -> showReminder=false;m.requestReminder(title,at)})
     if(showPaste) InputDialog("הדבקת רשימה","טבלה עם שורת כותרות",onDismiss={showPaste=false}) { m.previewPaste(it);showPaste=false }
     if(showSource) SourceDialog(onDismiss={showSource=false}) { name,url,topic -> showSource=false;m.saveSource(name,url,topic) }
     if(showMedication) MedicationDialog(editingMedication,onDismiss={showMedication=false}) { med -> showMedication=false;m.requestMedication(med) }
     m.importPreview?.let { preview -> AlertDialog(onDismissRequest={m.importPreview=null},title={Heading("בדיקת היבוא")},text={
-        Column(Modifier.heightIn(max=420.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            Text("${preview.accepted.size} רשומות תקינות להוספה")
+        Column(Modifier.heightIn(max=420.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+            val bCount = preview.accepted.count { it.birthDay != null && it.phone.isBlank() }
+            val cCount = preview.accepted.count { it.phone.isNotBlank() }
+            Text("${preview.accepted.size} רשומות תקינות להוספה ($bCount ימי הולדת, $cCount אנשי קשר עם טלפון)")
             preview.rows.forEach { row -> Text("שורה ${row.line}: ${row.error ?: ((row.person?.name ?: "") + if(row.duplicate) " — כפילות, תידלג" else " — תקין")}") }
         }
-    },confirmButton={TextButton({m.acceptImport()},Modifier.heightIn(min=64.dp),enabled=preview.accepted.isNotEmpty()&&!m.busy){Text("יבוא הרשומות התקינות")}},dismissButton={TextButton({m.importPreview=null},Modifier.heightIn(min=64.dp)){Text("ביטול")}}) }
-    m.restorePreview?.let { backup -> AlertDialog(onDismissRequest={m.restorePreview=null},title={Heading("שחזור גיבוי")},text={Text("${backup.people.size} אנשי קשר, ${backup.reminders.size} תזכורות, ${backup.medications.size} תרופות ו־${backup.sources.size} מקורות. ההגדרות יוחלפו ורשומות ימוזגו לפי מזהה. יש לבחור יומנים מחדש.")},
-        confirmButton={TextButton({m.restorePreview=null;m.runTask{Backup.merge(m.app,backup);m.status="הגיבוי שוחזר"}},Modifier.heightIn(min=64.dp)){Text("אישור שחזור")}},dismissButton={TextButton({m.restorePreview=null},Modifier.heightIn(min=64.dp)){Text("ביטול")}}) }
+    },confirmButton={TextButton({m.acceptImport()},Modifier.heightIn(min=56.dp),enabled=preview.accepted.isNotEmpty()&&!m.busy){Text("יבוא הרשומות התקינות")}},dismissButton={TextButton({m.importPreview=null},Modifier.heightIn(min=56.dp)){Text("ביטול")}}) }
+    m.restorePreview?.let { backup -> AlertDialog(onDismissRequest={m.restorePreview=null},title={Heading("שחזור גיבוי")},text={Text("${backup.people.size} רשומות, ${backup.reminders.size} תזכורות, ${backup.medications.size} תרופות ו־${backup.sources.size} מקורות.")},
+        confirmButton={TextButton({m.restorePreview=null;m.runTask{Backup.merge(m.app,backup);m.status="הגיבוי שוחזר"}},Modifier.heightIn(min=56.dp)){Text("אישור שחזור")}},dismissButton={TextButton({m.restorePreview=null},Modifier.heightIn(min=56.dp)){Text("ביטול")}}) }
 }
 
-@Composable private fun SettingsForm(m: CompanionModel,p: Profile,speech: DeviceSpeech,area: SettingsArea,requestCalendar:()->Unit,requestNotifications:()->Unit,requestExact:()->Unit,appSettings:()->Unit) {
+@Composable private fun FeatureToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+@Composable private fun SettingsForm(
+    m: CompanionModel, p: Profile, speech: DeviceSpeech, area: SettingsArea,
+    requestContacts: () -> Unit, requestCalendar: () -> Unit, requestNotifications: () -> Unit,
+    requestExact: () -> Unit, appSettings: () -> Unit
+) {
     var draft by remember(p) { mutableStateOf(p) }; var cityQuery by remember { mutableStateOf("") }
     var hour by remember(p) { mutableStateOf("%02d:%02d".format(p.noticeHour,p.noticeMinute)) }
     var error by remember { mutableStateOf("") }
+
+    if (area == SettingsArea.FEATURES) Panel {
+        Heading("פיצ׳רים פעילים במערכת")
+        Text("בחרו אילו כפתורים ופיצ׳רים יוצגו במסך הבית כדי לשמור על מסך פשוט וברור ללא גלילה:", style = MaterialTheme.typography.bodyMedium)
+        FeatureToggleRow("התקשרות לאנשי קשר", draft.enableCalls) {
+            draft = draft.copy(enableCalls = it); m.saveProfile(draft)
+        }
+        FeatureToggleRow("שימוש באנשי הקשר של הטלפון", draft.enablePhoneContacts) {
+            draft = draft.copy(enablePhoneContacts = it); m.saveProfile(draft)
+            if (it && !m.deviceContacts.allowed()) requestContacts()
+        }
+        if (draft.enablePhoneContacts && !m.deviceContacts.allowed()) {
+            Action("אישור הרשאה לאנשי הקשר בטלפון", Icons.Default.Contacts, secondary = true, onClick = requestContacts)
+        }
+        HorizontalDivider()
+        FeatureToggleRow("ימי הולדת", draft.enableBirthdays) {
+            draft = draft.copy(enableBirthdays = it); m.saveProfile(draft)
+        }
+        FeatureToggleRow("יומן ותזכורות (מה קרוב)", draft.enableAgenda) {
+            draft = draft.copy(enableAgenda = it); m.saveProfile(draft)
+        }
+        FeatureToggleRow("תרופות לפי חלקי היום", draft.enableMedications) {
+            draft = draft.copy(enableMedications = it); m.saveProfile(draft)
+        }
+        FeatureToggleRow("חדשות וספורט", draft.enableNews) {
+            draft = draft.copy(enableNews = it); m.saveProfile(draft)
+        }
+        FeatureToggleRow("מזג האוויר", draft.enableWeather) {
+            draft = draft.copy(enableWeather = it); m.saveProfile(draft)
+        }
+        FeatureToggleRow("תקציר הבוקר שלי", draft.enableMorning) {
+            draft = draft.copy(enableMorning = it); m.saveProfile(draft)
+        }
+    }
+
     if(area==SettingsArea.PROFILE) Panel {
         Heading("הפרטים שלי")
         Field(draft.name,"שם המשתמש") {draft=draft.copy(name=it)}
@@ -277,12 +518,10 @@ enum class SettingsArea(val label: String) {
         listOf("he-IL" to "עברית","en-US" to "English","ar" to "العربية").forEach { (code,label) ->
             Action((if(draft.language==code) "✓ " else "")+label,secondary=true) {draft=draft.copy(language=code,voice="")}
         }
-        Text("הפקודות המוגדרות בגרסה זו הן בעברית.",style=MaterialTheme.typography.bodyMedium)
         Text("מהירות דיבור: ${"%.2f".format(draft.rate)}")
         Slider(draft.rate,{draft=draft.copy(rate=it)},valueRange=.5f..1.5f,modifier=Modifier.semantics { contentDescription="מהירות דיבור" })
         Text("קול: ${draft.voice.ifBlank {"ברירת המחדל של המכשיר"}}",style=MaterialTheme.typography.bodyMedium)
         Action("קול ברירת מחדל",secondary=true) {draft=draft.copy(voice="")}
-        Text("אפשר להאזין לקולות הזמינים. המכשיר אינו תמיד מספק מידע על גבר או אישה.",style=MaterialTheme.typography.bodyMedium)
         speech.voices.filter { it.locale.language==java.util.Locale.forLanguageTag(draft.language).language }.forEach { voice ->
             Action(voice.name + if(voice.isNetworkConnectionRequired) " · דורש רשת" else "",secondary=true) {
                 draft=draft.copy(voice=voice.name);speech.say("שלום, זה הקול שנבחר",draft)
@@ -307,11 +546,10 @@ enum class SettingsArea(val label: String) {
         Heading("יומן והרשאות")
         Action("אישור קריאת יומן",Icons.Default.Event,secondary=true,onClick=requestCalendar)
         Text("בחרו רק יומנים שתרצו להציג. חשבון Google צריך להיות מסונכרן במכשיר.")
-        Text("בטלפון: הגדרות Android ← חשבונות ← Google ← החשבון שלכם ← סנכרון יומן. לאחר הסנכרון חזרו לכאן ואשרו קריאה.",style=MaterialTheme.typography.bodyMedium)
         if(m.calendarChoices.isEmpty()) Text("עדיין לא נמצאו יומנים. בדקו הרשאת יומן וסנכרון החשבון.")
         m.calendarChoices.forEach { choice -> Row(Modifier.fillMaxWidth().clickable {
             draft=draft.copy(calendarIds=if(choice.id in draft.calendarIds) draft.calendarIds-choice.id else draft.calendarIds+choice.id)
-        }.heightIn(min=64.dp),verticalAlignment=Alignment.CenterVertically) {
+        }.heightIn(min=56.dp),verticalAlignment=Alignment.CenterVertically) {
             Checkbox(choice.id in draft.calendarIds,{checked -> draft=draft.copy(calendarIds=if(checked) draft.calendarIds+choice.id else draft.calendarIds-choice.id)},Modifier.semantics {contentDescription=choice.name})
             Text(choice.name,Modifier.weight(1f))
         } }
@@ -323,38 +561,48 @@ enum class SettingsArea(val label: String) {
     }
 }
 
-@Composable private fun PersonDialog(person: Person?,onDismiss:()->Unit,onSave:(Person)->Unit) {
+@Composable private fun PersonDialog(person: Person?, onlyBirthday: Boolean = false, onDismiss:()->Unit, onSave:(Person)->Unit) {
     var name by remember {mutableStateOf(person?.name.orEmpty())};var aliases by remember {mutableStateOf(person?.aliases.orEmpty())}
     var phone by remember {mutableStateOf(person?.phone.orEmpty())};var birth by remember {mutableStateOf(person?.let { p -> p.birthDay?.let {"$it/${p.birthMonth}"+(p.birthYear?.let {y->"/$y"}?:"")} }.orEmpty())}
     var error by remember {mutableStateOf("")}
-    AlertDialog(onDismissRequest=onDismiss,title={Heading("איש קשר ויום הולדת")},text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-        Field(name,"שם"){name=it};Field(aliases,"כינויים, מופרדים בפסיק"){aliases=it};Field(phone,"מספר טלפון"){phone=it};Field(birth,"תאריך לידה: יום/חודש/שנה"){birth=it};if(error.isNotBlank())Text(error,color=MaterialTheme.colorScheme.error)
-    }},confirmButton={TextButton({try {
-        val preview=PeopleImport.preview(listOf(listOf("שם","כינוי","טלפון","תאריך לידה"),listOf(name,aliases,phone,birth)),emptyList())
-        val row=preview.rows.single();require(row.person!=null){row.error.orEmpty()};onSave(row.person.copy(id=person?.id?:row.person.id))
-    }catch(e:Exception){error=e.message?:"פרטים לא תקינים"}},Modifier.heightIn(min=64.dp)){Text("שמירה")}},dismissButton={TextButton(onDismiss,Modifier.heightIn(min=64.dp)){Text("ביטול")}})
+    AlertDialog(
+        onDismissRequest=onDismiss,
+        title={Heading(if (onlyBirthday) "הוספת יום הולדת" else "איש קשר ויום הולדת")},
+        text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            Field(name,"שם"){name=it}
+            Field(aliases,"כינויים, מופרדים בפסיק"){aliases=it}
+            if (!onlyBirthday) Field(phone,"מספר טלפון"){phone=it}
+            Field(birth,"תאריך לידה: יום/חודש או יום/חודש/שנה"){birth=it}
+            if(error.isNotBlank())Text(error,color=MaterialTheme.colorScheme.error)
+        }},
+        confirmButton={TextButton({try {
+            val preview=PeopleImport.preview(listOf(listOf("שם","כינוי","טלפון","תאריך לידה"),listOf(name,aliases,if(onlyBirthday) "" else phone,birth)),emptyList())
+            val row=preview.rows.single();require(row.person!=null){row.error.orEmpty()};onSave(row.person.copy(id=person?.id?:row.person.id))
+        }catch(e:Exception){error=e.message?:"פרטים לא תקינים"}},Modifier.heightIn(min=56.dp)){Text("שמירה")}},
+        dismissButton={TextButton(onDismiss,Modifier.heightIn(min=56.dp)){Text("ביטול")}}
+    )
 }
 @Composable private fun ReminderDialog(p:Profile,onDismiss:()->Unit,onSave:(String,LocalDateTime)->Unit) {
     var title by remember {mutableStateOf("")};var date by remember {mutableStateOf(LocalDate.now(ZoneId.of(p.zone)).plusDays(1).toString())};var time by remember {mutableStateOf("09:00")};var error by remember {mutableStateOf("")}
     AlertDialog(onDismissRequest=onDismiss,title={Heading("תזכורת חדשה")},text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         Field(title,"מה להזכיר?"){title=it};Field(date,"תאריך, למשל 2026-12-25"){date=it};Field(time,"שעה, למשל 09:00"){time=it};if(error.isNotBlank())Text(error,color=MaterialTheme.colorScheme.error)
-    }},confirmButton={TextButton({try{val at=LocalDate.parse(date).atTime(LocalTime.parse(time));require(title.isNotBlank()&&at.isAfter(LocalDateTime.now(ZoneId.of(p.zone))));onSave(title,at)}catch(_:Exception){error="יש להזין תיאור, תאריך ושעה עתידיים"}},Modifier.heightIn(min=64.dp)){Text("המשך לאישור")}},dismissButton={TextButton(onDismiss,Modifier.heightIn(min=64.dp)){Text("ביטול")}})
+    }},confirmButton={TextButton({try{val at=LocalDate.parse(date).atTime(LocalTime.parse(time));require(title.isNotBlank()&&at.isAfter(LocalDateTime.now(ZoneId.of(p.zone))));onSave(title,at)}catch(_:Exception){error="יש להזין תיאור, תאריך ושעה עתידיים"}},Modifier.heightIn(min=56.dp)){Text("המשך לאישור")}},dismissButton={TextButton(onDismiss,Modifier.heightIn(min=56.dp)){Text("ביטול")}})
 }
 @Composable private fun InputDialog(title:String,label:String,onDismiss:()->Unit,onSave:(String)->Unit) {
     var text by remember{mutableStateOf("")}
     val clipboard=LocalClipboardManager.current
     AlertDialog(onDismissRequest=onDismiss,title={Heading(title)},text={Column(Modifier.heightIn(max=420.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)){
-        Text("העתיקו מאקסל את הטבלה יחד עם שורת הכותרות: שם, כינוי, טלפון, תאריך לידה.")
+        Text("העתיקו מאקסל את הטבלה יחד עם שורת הכותרות: שם, תאריך לידה (ואם תרצו גם כינוי וטלפון).")
         Action("הדבקה מהלוח",Icons.Default.ContentPaste,secondary=true) {text=clipboard.getText()?.text.orEmpty()}
         Field(text,label){text=it}
-    }},confirmButton={TextButton({onSave(text)},Modifier.heightIn(min=64.dp)){Text("תצוגה מקדימה")}},dismissButton={TextButton(onDismiss,Modifier.heightIn(min=64.dp)){Text("ביטול")}})
+    }},confirmButton={TextButton({onSave(text)},Modifier.heightIn(min=56.dp)){Text("תצוגה מקדימה")}},dismissButton={TextButton(onDismiss,Modifier.heightIn(min=56.dp)){Text("ביטול")}})
 }
 @Composable private fun SourceDialog(onDismiss:()->Unit,onSave:(String,String,Topic)->Unit) {
     var name by remember{mutableStateOf("")};var url by remember{mutableStateOf("")};var topic by remember{mutableStateOf(Topic.GENERAL)}
     AlertDialog(onDismissRequest=onDismiss,title={Heading("מקור חדשות")},text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)){
         Field(name,"שם האתר"){name=it};Field(url,"קישור RSS המתחיל ב־https://"){url=it}
         Topic.entries.forEach{t->Action((if(topic==t)"✓ " else "")+t.label,secondary=true){topic=t}}
-    }},confirmButton={TextButton({onSave(name,url,topic)},Modifier.heightIn(min=64.dp)){Text("בדיקה ושמירה")}},dismissButton={TextButton(onDismiss,Modifier.heightIn(min=64.dp)){Text("ביטול")}})
+    }},confirmButton={TextButton({onSave(name,url,topic)},Modifier.heightIn(min=56.dp)){Text("בדיקה ושמירה")}},dismissButton={TextButton(onDismiss,Modifier.heightIn(min=56.dp)){Text("ביטול")}})
 }
 
 @Composable private fun MedicationDialog(medication:Medication?,onDismiss:()->Unit,onSave:(Medication)->Unit) {
@@ -389,6 +637,6 @@ enum class SettingsArea(val label: String) {
         val slots=MedicationSchedule.encode(selected.map { MedicationTime(it,LocalTime.parse(times[it].orEmpty())) })
         onSave(Medication(id=medication?.id?:java.util.UUID.randomUUID().toString(),name=name.trim(),instructions=instructions.trim(),slots=slots,enabled=enabled))
     }catch(_:java.time.DateTimeException){error="לכל חלק יום שנבחר יש להזין שעה תקינה, למשל 08:00"}
-     catch(e:IllegalArgumentException){error=e.message?:"בדקו את הפרטים"}},Modifier.heightIn(min=64.dp)){Text("המשך לאישור")}},
-        dismissButton={TextButton(onDismiss,Modifier.heightIn(min=64.dp)){Text("ביטול")}})
+     catch(e:IllegalArgumentException){error=e.message?:"בדקו את הפרטים"}},Modifier.heightIn(min=56.dp)){Text("המשך לאישור")}},
+        dismissButton={TextButton(onDismiss,Modifier.heightIn(min=56.dp)){Text("ביטול")}})
 }

@@ -30,6 +30,7 @@ class SettingsTest {
         compose.onNodeWithText("כתובת").assertExists()
         compose.onNodeWithText("חזרה לתפריט ההגדרות").performScrollTo().performClick()
         compose.onNodeWithText("אנשי קשר וימי הולדת").performScrollTo().performClick()
+        compose.onNodeWithText("ימי הולדת").performClick()
         compose.onNodeWithText("יבוא קובץ Excel").assertExists()
         compose.onNodeWithText("הדבקת טבלה").assertExists()
         compose.onNodeWithText("חזרה לתפריט ההגדרות").performScrollTo().performClick()

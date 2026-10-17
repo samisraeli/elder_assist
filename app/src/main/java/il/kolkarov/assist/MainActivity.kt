@@ -27,6 +27,10 @@ class MainActivity : ComponentActivity() {
     private val phone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         pendingCall?.let { person -> pendingCall = null; openCall(person,granted) }
     }
+    private val contacts = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if(granted) { model.loadPhoneContacts(); model.status = "אנשי הקשר מהטלפון נטענו" }
+        else model.status = "אין הרשאה לקריאת אנשי קשר מהטלפון"
+    }
     private val calendars = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if(granted) { model.loadCalendars(); model.refreshNotices() } else model.status = "אין הרשאת יומן. תזכורות וימי הולדת עדיין זמינים"
     }
@@ -64,7 +68,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         speech = DeviceSpeech(this) { model.status = it }
-        input = VoiceInput(this,{ model.status = it },{ model.command(it) })
+        input = VoiceInput(this,{ model.status = it },{ model.listening = it },{ model.command(it) })
         model.output = speech
         model.dial = { person ->
             if(checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) openCall(person,true)
@@ -76,11 +80,17 @@ class MainActivity : ComponentActivity() {
                 CompanionUi(model,profile,speech,
                     listen = {
                         if(!model.busy) {
-                            speech.stop()
-                            if(checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) input.listen(profile.language)
-                            else microphone.launch(Manifest.permission.RECORD_AUDIO)
+                            if(model.listening) {
+                                input.cancel()
+                                model.status = "מוכן להקשיב"
+                            } else {
+                                speech.stop()
+                                if(checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) input.listen(profile.language)
+                                else microphone.launch(Manifest.permission.RECORD_AUDIO)
+                            }
                         }
                     }, stop = { input.cancel(); model.stop() },
+                    requestContacts = { contacts.launch(Manifest.permission.READ_CONTACTS) },
                     requestCalendar = { calendars.launch(Manifest.permission.READ_CALENDAR) },
                     requestNotifications = { if(Build.VERSION.SDK_INT >= 33) notifications.launch(Manifest.permission.POST_NOTIFICATIONS) else model.status = "ההתראות זמינות; אפשר לבדוק בהגדרות המכשיר" },
                     requestExact = { if(Build.VERSION.SDK_INT >= 31) startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,Uri.parse("package:$packageName"))) },
@@ -101,7 +111,7 @@ class MainActivity : ComponentActivity() {
         runCatching { startActivity(Intent(if(direct) Intent.ACTION_CALL else Intent.ACTION_DIAL,Uri.fromParts("tel",person.phone,null))) }
             .onFailure { runCatching { startActivity(Intent(Intent.ACTION_DIAL,Uri.fromParts("tel",person.phone,null))) }.onFailure { model.status = "אין יישום חיוג זמין במכשיר" } }
     }
-    override fun onResume() { super.onResume(); if(::speech.isInitialized) model.output=speech; model.refreshNotices(); model.loadAgenda(); model.loadCalendars() }
+    override fun onResume() { super.onResume(); if(::speech.isInitialized) model.output=speech; model.refreshNotices(); model.loadAgenda(); model.loadCalendars(); model.loadPhoneContacts() }
     override fun onStop() {
         super.onStop()
         if(::input.isInitialized) input.cancel()

@@ -76,7 +76,15 @@ class ProfileStore(private val context: Context) {
             dark = p[booleanPreferencesKey("dark")] ?: false, fontScale = p[floatPreferencesKey("font")] ?: 1f,
             noticeHour = p[intPreferencesKey("hour")] ?: 9, noticeMinute = p[intPreferencesKey("minute")] ?: 0,
             calendarIds = p[stringSetPreferencesKey("calendars")] ?: emptySet(),
-            morningNotice = p[booleanPreferencesKey("morning")] ?: false
+            morningNotice = p[booleanPreferencesKey("morning")] ?: false,
+            enableCalls = p[booleanPreferencesKey("enableCalls")] ?: true,
+            enablePhoneContacts = p[booleanPreferencesKey("enablePhoneContacts")] ?: true,
+            enableBirthdays = p[booleanPreferencesKey("enableBirthdays")] ?: false,
+            enableMedications = p[booleanPreferencesKey("enableMedications")] ?: false,
+            enableNews = p[booleanPreferencesKey("enableNews")] ?: false,
+            enableWeather = p[booleanPreferencesKey("enableWeather")] ?: false,
+            enableAgenda = p[booleanPreferencesKey("enableAgenda")] ?: false,
+            enableMorning = p[booleanPreferencesKey("enableMorning")] ?: false
         )
     }
     suspend fun save(p: Profile) { context.settings.edit { v ->
@@ -89,6 +97,14 @@ class ProfileStore(private val context: Context) {
         v[booleanPreferencesKey("dark")] = p.dark; v[floatPreferencesKey("font")] = p.fontScale.coerceIn(1f, 1.5f)
         v[intPreferencesKey("hour")] = p.noticeHour.coerceIn(0,23); v[intPreferencesKey("minute")] = p.noticeMinute.coerceIn(0,59)
         v[stringSetPreferencesKey("calendars")] = p.calendarIds; v[booleanPreferencesKey("morning")] = p.morningNotice
+        v[booleanPreferencesKey("enableCalls")] = p.enableCalls
+        v[booleanPreferencesKey("enablePhoneContacts")] = p.enablePhoneContacts
+        v[booleanPreferencesKey("enableBirthdays")] = p.enableBirthdays
+        v[booleanPreferencesKey("enableMedications")] = p.enableMedications
+        v[booleanPreferencesKey("enableNews")] = p.enableNews
+        v[booleanPreferencesKey("enableWeather")] = p.enableWeather
+        v[booleanPreferencesKey("enableAgenda")] = p.enableAgenda
+        v[booleanPreferencesKey("enableMorning")] = p.enableMorning
     } }
 }
 

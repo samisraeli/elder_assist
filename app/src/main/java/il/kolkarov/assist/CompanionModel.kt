@@ -20,15 +20,19 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
     val sources = dao.sources().stateIn(viewModelScope,SharingStarted.Eagerly,emptyList())
     val medications = dao.medications().stateIn(viewModelScope,SharingStarted.Eagerly,emptyList())
     val calendar: CalendarProvider = DeviceCalendar(app)
+    val deviceContacts = DeviceContacts(app)
     val weather: WeatherProvider = OpenMeteo()
     val news: NewsProvider = RssNews()
     var screen by mutableStateOf(Screen.HOME)
     var status by mutableStateOf("מוכן להקשיב")
+    var listening by mutableStateOf(false)
     var transcript by mutableStateOf("")
     var answer by mutableStateOf("")
+    var spokenAnswer by mutableStateOf(false)
     var busy by mutableStateOf(false)
     var confirmation by mutableStateOf<Confirmation?>(null)
     var callChoices by mutableStateOf<List<Person>>(emptyList())
+    var phonePeople by mutableStateOf<List<Person>>(emptyList())
     var agenda by mutableStateOf<List<AgendaItem>>(emptyList())
     var newsResult by mutableStateOf<NewsResult?>(null)
     var topic by mutableStateOf(Topic.GENERAL)
@@ -50,6 +54,21 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun allCallablePeople(): List<Person> {
+        val localWithPhone = people.value.filter { it.phone.isNotBlank() }
+        if (!profile.value.enablePhoneContacts) return localWithPhone
+        val seen = localWithPhone.map { "${normalized(it.name)}|${it.phone}" }.toMutableSet()
+        val extra = phonePeople.filter { it.phone.isNotBlank() && seen.add("${normalized(it.name)}|${it.phone}") }
+        return (localWithPhone + extra).sortedBy { it.name }
+    }
+
+    fun loadPhoneContacts() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val loaded = runCatching { deviceContacts.load() }.getOrDefault(emptyList())
+            withContext(Dispatchers.Main) { phonePeople = loaded }
+        }
+    }
+
     fun runTask(action: suspend () -> Unit) {
         if (busy) return
         task = viewModelScope.launch {
@@ -59,7 +78,11 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
             finally { busy = false }
         }
     }
-    fun respond(text: String, speak: Boolean = true) { answer = text; if (speak) output?.say(text,profile.value) }
+    fun respond(text: String, speak: Boolean = true) {
+        answer = text
+        spokenAnswer = speak
+        if (speak) output?.say(text,profile.value)
+    }
     private fun friendlyError(e: Exception): String = when(e) {
         is java.net.UnknownHostException, is java.net.ConnectException -> "אין חיבור לשירות. בדקו את האינטרנט ונסו שוב"
         is java.net.SocketTimeoutException -> "השירות לא ענה בזמן. נסו שוב בעוד רגע"
@@ -67,7 +90,7 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         is org.json.JSONException -> "השירות או הקובץ החזירו מידע שאינו תקין"
         else -> e.message?.takeIf { it.any { c -> c in 'א'..'ת' } } ?: "הפעולה לא הצליחה. בדקו את החיבור ואת הקובץ ונסו שוב"
     }
-    fun stop() { task?.cancel(); output?.stop(); status = "ההקראה נעצרה" }
+    fun stop() { task?.cancel(); listening = false; output?.stop(); status = "ההקראה נעצרה" }
     fun ask(text: String, action: suspend () -> Unit) { confirmation = Confirmation(text,action); respond(text) }
     fun confirm() {
         val pending = confirmation ?: return
@@ -75,14 +98,27 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         confirmation = null; output?.stop()
         runTask { pending.action() }
     }
-    fun cancel() { confirmation = null; callChoices = emptyList(); output?.stop(); status = "הפעולה בוטלה" }
-    fun navigate(to: Screen) { cancel(); screen = to; if (to == Screen.AGENDA) loadAgenda(); if(to == Screen.SETTINGS) loadCalendars() }
+    fun cancel() { confirmation = null; callChoices = emptyList(); listening = false; output?.stop(); status = "הפעולה בוטלה" }
+    fun navigate(to: Screen) {
+        confirmation = null; callChoices = emptyList(); listening = false; output?.stop()
+        answer = ""; spokenAnswer = false; status = "מוכן להקשיב"
+        screen = to
+        if (to == Screen.AGENDA) loadAgenda()
+        if (to == Screen.CALLS) loadPhoneContacts()
+        if (to == Screen.SETTINGS) { loadCalendars(); loadPhoneContacts() }
+    }
 
     fun command(text: String) {
         transcript = text
-        val command = CommandParser.parse(text,LocalDateTime.now(ZoneId.of(profile.value.zone)))
+        val trimmed = normalized(text)
         if (confirmation != null) {
+            val command = CommandParser.parse(text,LocalDateTime.now(ZoneId.of(profile.value.zone)))
             when(command) { Command.Confirm -> confirm(); Command.Cancel, Command.Stop -> cancel(); else -> respond("ממתינה פעולה לאישור. אמרו כן או ביטול") }
+            return
+        }
+        val command = CommandParser.parse(text,LocalDateTime.now(ZoneId.of(profile.value.zone)))
+        if (screen == Screen.CALLS && command is Command.Clarify && trimmed.isNotBlank()) {
+            findCall(text)
             return
         }
         when(command) {
@@ -102,18 +138,25 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
                 if(command.title.isBlank() || matches.size != 1) { screen = Screen.AGENDA; loadAgenda(); respond("בחרו תזכורת מהרשימה כדי לבטל אותה") }
                 else requestDeleteReminder(matches.single())
             }
-            is Command.Clarify -> respond(command.message)
+            is Command.Clarify -> {
+                val candidates = allCallablePeople()
+                val directMatch = if (trimmed.length >= 2) candidates.filter { p ->
+                    (listOf(p.name) + p.aliases.split(',', ';')).any { it.isNotBlank() && normalized(it) == trimmed }
+                } else emptyList()
+                if (directMatch.isNotEmpty()) findCall(text) else respond(command.message)
+            }
         }
     }
     fun findCall(name: String) {
         screen = Screen.CALLS
-        val target = normalized(name)
-        val exact = people.value.filter { p -> (listOf(p.name) + p.aliases.split(',', ';')).any { normalized(it) == target } }
-        val matches = exact.ifEmpty { people.value.filter { p -> (listOf(p.name) + p.aliases.split(',', ';')).any { normalized(it).contains(target) } } }
+        val target = normalized(name).replace(Regex("^(אל |ל)"), "").trim()
+        val candidates = allCallablePeople()
+        val exact = candidates.filter { p -> (listOf(p.name) + p.aliases.split(',', ';')).any { it.isNotBlank() && normalized(it) == target } }
+        val matches = exact.ifEmpty { candidates.filter { p -> (listOf(p.name) + p.aliases.split(',', ';')).any { it.isNotBlank() && (normalized(it).contains(target) || target.contains(normalized(it))) } } }
         when(matches.size) {
-            0 -> respond("לא נמצא איש קשר בשם $name. אפשר להוסיף בהגדרות המשפחה")
+            0 -> respond("לא נמצא איש קשר בשם $name", false)
             1 -> requestCall(matches.single())
-            else -> { callChoices = matches; respond("נמצאו כמה אנשי קשר. לחצו על השם הרצוי, או אמרו התקשר ואת השם המלא") }
+            else -> { callChoices = matches; respond("נמצאו ${matches.size} אנשי קשר עבור $name. לחצו על השם הרצוי") }
         }
     }
     fun requestCall(person: Person) {

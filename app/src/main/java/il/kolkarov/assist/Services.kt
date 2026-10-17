@@ -147,3 +147,32 @@ class DeviceCalendar(private val context: Context) : CalendarProvider {
         } ?: emptyList()
     }
 }
+
+class DeviceContacts(private val context: Context) {
+    fun allowed() = context.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+    fun load(): List<Person> {
+        if (!allowed()) return emptyList()
+        val uri = android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+        val projection = arrayOf(
+            android.provider.ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
+            android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER
+        )
+        val seen = mutableSetOf<String>()
+        return context.contentResolver.query(uri, projection, null, null, android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC")?.use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    val id = c.getString(0) ?: continue
+                    val name = c.getString(1)?.trim().orEmpty()
+                    val rawPhone = c.getString(2)?.replace(Regex("[\\s()\\-]"), "").orEmpty()
+                    if (name.isBlank() || rawPhone.isBlank()) continue
+                    val key = "${normalized(name)}|$rawPhone"
+                    if (seen.add(key)) {
+                        add(Person(id = "device:$id:$rawPhone", name = name, phone = rawPhone))
+                    }
+                }
+            }
+        } ?: emptyList()
+    }
+}
+

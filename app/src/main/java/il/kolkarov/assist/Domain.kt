@@ -11,7 +11,11 @@ data class Profile(
     val latitude: Double? = null, val longitude: Double? = null, val zone: String = "Asia/Jerusalem",
     val language: String = "he-IL", val voice: String = "", val rate: Float = .85f,
     val dark: Boolean = false, val fontScale: Float = 1f, val noticeHour: Int = 9,
-    val noticeMinute: Int = 0, val calendarIds: Set<String> = emptySet(), val morningNotice: Boolean = false
+    val noticeMinute: Int = 0, val calendarIds: Set<String> = emptySet(), val morningNotice: Boolean = false,
+    val enableCalls: Boolean = true, val enablePhoneContacts: Boolean = true,
+    val enableBirthdays: Boolean = false, val enableMedications: Boolean = false,
+    val enableNews: Boolean = false, val enableWeather: Boolean = false,
+    val enableAgenda: Boolean = false, val enableMorning: Boolean = false
 )
 
 data class CalendarChoice(val id: String, val name: String)
@@ -61,8 +65,8 @@ object CommandParser {
             s.startsWith("בטל תזכורת") || s.startsWith("מחק תזכורת") ->
                 Command.CancelReminder(s.substringAfter("תזכורת").trim())
             s.startsWith("תזכיר") -> reminder(s, now)
-            Regex("^(התקשר|תתקשר|התקשרי|חייג|תחייג)( אל)?( ל)? ?").containsMatchIn(s) -> {
-                val name = s.replaceFirst(Regex("^(התקשר|תתקשר|התקשרי|חייג|תחייג)( אל)?( ל)? ?"), "").trim()
+            Regex("^(התקשר|תתקשר|התקשרי|תתקשרי|להתקשר|חייג|תחייג|חייגי|תחייגי|לחייג|שיחה)( עם| אל| ל)? ?").containsMatchIn(s) -> {
+                val name = s.replaceFirst(Regex("^(התקשר|תתקשר|התקשרי|תתקשרי|להתקשר|חייג|תחייג|חייגי|תחייגי|לחייג|שיחה)( עם| אל)?( ל)? ?"), "").trim()
                 if (name.isEmpty()) Command.Clarify("למי להתקשר? אמרו למשל: התקשר לשלום") else Command.Call(name)
             }
             s.contains("חדשות") || s.contains("ספורט") || s.contains("בידור") || s.contains("תרבות") ->

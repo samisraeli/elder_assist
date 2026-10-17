@@ -9,11 +9,11 @@ class HomeTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
     @Test fun mainVoiceButtonAndPersistentNavigationAreVisible() {
         compose.onNodeWithText("דבר איתי").assertIsDisplayed()
-        compose.onNodeWithText("בית",useUnmergedTree=true).assertIsDisplayed()
-        compose.onNodeWithText("עצור",useUnmergedTree=true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("בית",useUnmergedTree=true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("עצור",useUnmergedTree=true).assertIsDisplayed()
     }
     @Test fun contactsEmptyStateIsHonest() {
         compose.onNodeWithText("התקשרות").performScrollTo().performClick()
-        compose.onNodeWithText("אין עדיין אנשי קשר. אפשר להוסיף בהגדרות המשפחה.").assertExists()
+        compose.onNodeWithText("אין עדיין אנשי קשר",substring=true).assertExists()
     }
 }

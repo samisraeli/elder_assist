@@ -15,6 +15,10 @@ object Backup {
             put("lat",p.latitude); put("lon",p.longitude); put("zone",p.zone); put("language",p.language)
             put("voice",p.voice); put("rate",p.rate); put("dark",p.dark); put("font",p.fontScale)
             put("hour",p.noticeHour); put("minute",p.noticeMinute); put("morning",p.morningNotice)
+            put("enableCalls",p.enableCalls); put("enablePhoneContacts",p.enablePhoneContacts)
+            put("enableBirthdays",p.enableBirthdays); put("enableMedications",p.enableMedications)
+            put("enableNews",p.enableNews); put("enableWeather",p.enableWeather)
+            put("enableAgenda",p.enableAgenda); put("enableMorning",p.enableMorning)
         })
         put("people",JSONArray().apply { people.forEach { p -> put(JSONObject().apply {
             put("id",p.id); put("name",p.name); put("aliases",p.aliases); put("phone",p.phone)
@@ -36,7 +40,11 @@ object Backup {
         val zone = p.getString("zone"); ZoneId.of(zone)
         val profile = Profile(p.getString("name"),p.getString("address"),p.getString("city"),p.getString("country"),lat,lon,zone,
             p.optString("language","he-IL"),p.optString("voice"),p.optDouble("rate",.85).toFloat(),p.optBoolean("dark"),p.optDouble("font",1.0).toFloat(),
-            p.optInt("hour",9),p.optInt("minute",0),emptySet(),p.optBoolean("morning"))
+            p.optInt("hour",9),p.optInt("minute",0),emptySet(),p.optBoolean("morning"),
+            p.optBoolean("enableCalls",true),p.optBoolean("enablePhoneContacts",true),
+            p.optBoolean("enableBirthdays",false),p.optBoolean("enableMedications",false),
+            p.optBoolean("enableNews",false),p.optBoolean("enableWeather",false),
+            p.optBoolean("enableAgenda",false),p.optBoolean("enableMorning",false))
         require(profile.noticeHour in 0..23 && profile.noticeMinute in 0..59 && profile.rate in .5f..1.5f && profile.fontScale in 1f..1.5f)
         fun array(name: String): List<JSONObject> = o.getJSONArray(name).let { a -> require(a.length() <= 5000); (0 until a.length()).map { a.getJSONObject(it) } }
         val people = array("people").map { v ->
