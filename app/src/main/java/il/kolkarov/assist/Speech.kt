@@ -58,15 +58,23 @@ class VoiceInput(
     private val context: Context,
     private val state: (String) -> Unit,
     private val onListening: (Boolean) -> Unit,
-    private val result: (String) -> Unit
+    private val fallbackDialog: (Intent) -> Unit,
+    private val result: (List<String>) -> Unit
 ) {
     private var recognizer: SpeechRecognizer? = null
     private var generation = 0
     fun listen(language: String) {
         val session = ++generation
+        val speechIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "דברו עכשיו...")
+        }
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             onListening(false)
-            state("אין שירות זיהוי דיבור במכשיר. אפשר להשתמש בכפתורים")
+            fallbackDialog(speechIntent)
             return
         }
         onListening(true)
@@ -82,29 +90,29 @@ class VoiceInput(
                 override fun onError(error: Int) {
                     if(session!=generation) return
                     onListening(false)
+                    if (error == SpeechRecognizer.ERROR_CLIENT || error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS || error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == 11 || error == 12 || error == 13) {
+                        fallbackDialog(speechIntent)
+                        return
+                    }
                     state(when(error) {
-                        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "זיהוי הדיבור זקוק לחיבור אינטרנט. נסו שוב"
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "נדרשת הרשאת מיקרופון"
+                        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "זיהוי הדיבור זקוק לחיבור אינטרנט"
                         SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "לא שמעתי בבירור. לחצו ונסו שוב"
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "המיקרופון עסוק. נסו שוב בעוד רגע"
-                        else -> "זיהוי הדיבור לא הצליח. אפשר לנסות שוב או להשתמש בכפתורים"
+                        else -> "לא שמעתי בבירור. לחצו ונסו שוב"
                     })
                 }
                 override fun onResults(results: Bundle?) {
                     if(session!=generation) return
                     onListening(false)
-                    val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                    if (text.isNullOrBlank()) state("לא שמעתי בבירור") else result(text)
+                    val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.filter { it.isNotBlank() }.orEmpty()
+                    if (list.isEmpty()) state("לא שמעתי בבירור") else result(list)
                 }
                 override fun onPartialResults(partialResults: Bundle?) {}
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })
-            startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE,language)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE,language)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS,3)
-            })
+            runCatching { startListening(speechIntent) }.onFailure {
+                onListening(false)
+                fallbackDialog(speechIntent)
+            }
         }
     }
     fun cancel() { generation++; onListening(false); recognizer?.cancel() }

@@ -5,6 +5,8 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
@@ -14,13 +16,16 @@ import androidx.compose.ui.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
@@ -37,6 +42,8 @@ private val AssistantFont = FontFamily(
     Font(R.font.assistant, FontWeight.Bold)
 )
 private val clockFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+private val hebrewLetters = listOf("א","ב","ג","ד","ה","ו","ז","ח","ט","י","כ","ל","מ","נ","ס","ע","פ","צ","ק","ר","ש","ת")
+private val englishLetters = ('A'..'Z').map { it.toString() }
 
 enum class SettingsArea(val label: String) {
     FEATURES("פיצ׳רים פעילים"),
@@ -101,7 +108,19 @@ enum class SettingsArea(val label: String) {
 }
 @Composable private fun Heading(text: String) { Text(text,style=MaterialTheme.typography.titleLarge) }
 @Composable fun Field(value: String, label: String, onChange: (String) -> Unit) {
-    OutlinedTextField(value,onChange,Modifier.fillMaxWidth(),label={ Text(label) },textStyle=MaterialTheme.typography.bodyLarge,shape=RoundedCornerShape(14.dp))
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(label) },
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyLarge,
+        shape = RoundedCornerShape(14.dp),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { keyboard?.hide(); focusManager.clearFocus() })
+    )
 }
 
 @Composable fun CompanionUi(
@@ -116,11 +135,15 @@ enum class SettingsArea(val label: String) {
     var personOnlyBirthday by remember { mutableStateOf(false) }
     var peopleTab by remember { mutableStateOf(0) }
     var callFilter by remember { mutableStateOf("") }
+    var selectedLetter by remember { mutableStateOf<String?>(null) }
+    var englishMode by remember { mutableStateOf(false) }
     var showReminder by remember { mutableStateOf(false) }; var showPaste by remember { mutableStateOf(false) }
     var showSource by remember { mutableStateOf(false) }; var familyGate by remember { mutableStateOf(false) }
     var settingsArea by remember { mutableStateOf<SettingsArea?>(null) }
     var showMedication by remember { mutableStateOf(false) }; var editingMedication by remember { mutableStateOf<Medication?>(null) }
     val pageScroll = rememberScrollState()
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     var nowTime by remember { mutableStateOf(ZonedDateTime.now(ZoneId.of(p.zone))) }
     LaunchedEffect(p.zone) {
         while(true) {
@@ -130,6 +153,7 @@ enum class SettingsArea(val label: String) {
     }
     LaunchedEffect(m.screen,settingsArea) { pageScroll.scrollTo(0) }
     val canStop = m.listening || speech.speaking || m.busy
+    val quietStatuses = setOf("מוכן להקשיב", "הפעולה בוטלה", "ההקראה נעצרה")
     Scaffold(containerColor=MaterialTheme.colorScheme.background,
         topBar = {
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal=16.dp,vertical=8.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -149,7 +173,7 @@ enum class SettingsArea(val label: String) {
                     verticalAlignment=Alignment.CenterVertically
                 ) {
                     OutlinedButton(
-                        onClick = { m.navigate(Screen.HOME) },
+                        onClick = { keyboard?.hide(); focusManager.clearFocus(); m.navigate(Screen.HOME) },
                         modifier = Modifier.weight(1f).height(56.dp),
                         shape = RoundedCornerShape(18.dp)
                     ) {
@@ -182,7 +206,7 @@ enum class SettingsArea(val label: String) {
         }
     ) { padding ->
         Column(Modifier.padding(padding).verticalScroll(pageScroll).padding(horizontal=18.dp,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
-            if (m.listening || m.busy || speech.speaking || (m.status.isNotBlank() && m.status != "מוכן להקשיב" && m.status != "הפעולה בוטלה")) {
+            if (m.listening || m.busy || speech.speaking || (m.status.isNotBlank() && m.status !in quietStatuses)) {
                 Text(
                     m.status,
                     Modifier.semantics { liveRegion = LiveRegionMode.Polite },
@@ -283,30 +307,128 @@ enum class SettingsArea(val label: String) {
                 Screen.CALLS -> {
                     Heading("למי להתקשר?")
                     Action(
-                        text = if (m.listening) "מקשיב לשם איש הקשר... (לחצו לעצירה)" else "חיפוש בקול (אמרו שם או התקשר ל...)",
+                        text = if (m.listening) "מקשיב לשם איש הקשר... (לחצו לעצירה)" else "חיפוש בקול (אמרו שם)",
                         icon = Icons.Default.Mic,
                         enabled = !m.busy,
                         active = m.listening,
-                        onClick = listen
+                        onClick = { keyboard?.hide(); focusManager.clearFocus(); listen() }
                     )
                     if (p.enablePhoneContacts && !m.deviceContacts.allowed()) {
                         Action("אישור גישה לאנשי הקשר בטלפון", Icons.Default.Contacts, secondary = true, onClick = requestContacts)
                     }
-                    Field(callFilter, "חיפוש לפי שם") { callFilter = it; m.callChoices = emptyList() }
-                    val allCallable = m.allCallablePeople()
-                    val filtered = if (m.callChoices.isNotEmpty()) m.callChoices else if (callFilter.isBlank()) allCallable else {
-                        val q = normalized(callFilter)
-                        allCallable.filter { person ->
-                            (listOf(person.name) + person.aliases.split(',', ';')).any { normalized(it).contains(q) } || person.phone.contains(q)
+
+                    // Search Field with Clear and Hide Keyboard buttons
+                    OutlinedTextField(
+                        value = callFilter,
+                        onValueChange = { callFilter = it; selectedLetter = null; m.callChoices = emptyList() },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("חיפוש לפי שם") },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyLarge,
+                        shape = RoundedCornerShape(14.dp),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide(); focusManager.clearFocus() }),
+                        trailingIcon = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (callFilter.isNotEmpty() || selectedLetter != null) {
+                                    IconButton({ callFilter = ""; selectedLetter = null; m.callChoices = emptyList() }) {
+                                        Icon(Icons.Default.Clear, contentDescription = "נקה חיפוש")
+                                    }
+                                }
+                                IconButton({ keyboard?.hide(); focusManager.clearFocus() }) {
+                                    Icon(Icons.Default.KeyboardHide, contentDescription = "סגירת מקלדת")
+                                }
+                            }
+                        }
+                    )
+
+                    // Alphabet Quick Filter Bar (א-ב / A-Z)
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilterChip(
+                            selected = selectedLetter == null && callFilter.isBlank(),
+                            onClick = { selectedLetter = null; callFilter = ""; m.callChoices = emptyList(); keyboard?.hide(); focusManager.clearFocus() },
+                            label = { Text("הכל", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold) }
+                        )
+                        FilterChip(
+                            selected = false,
+                            onClick = { englishMode = !englishMode; selectedLetter = null },
+                            label = { Text(if (englishMode) "א-ב" else "A-Z", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold) }
+                        )
+                        val letters = if (englishMode) englishLetters else hebrewLetters
+                        letters.forEach { letter ->
+                            FilterChip(
+                                selected = selectedLetter == letter,
+                                onClick = {
+                                    selectedLetter = if (selectedLetter == letter) null else letter
+                                    callFilter = ""
+                                    m.callChoices = emptyList()
+                                    keyboard?.hide()
+                                    focusManager.clearFocus()
+                                },
+                                label = { Text(letter, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold) }
+                            )
                         }
                     }
+
+                    // Precomputed fast contact list
+                    val allCallable = remember(people, m.phonePeople, p.enablePhoneContacts) { m.allCallablePeople() }
+                    val indexedCallable = remember(allCallable) {
+                        allCallable.map { person ->
+                            val cleanName = normalized(person.name)
+                            val searchBlob = (listOf(cleanName) + person.aliases.split(',', ';').map { normalized(it) } + person.phone).joinToString(" ")
+                            Triple(person, cleanName, searchBlob)
+                        }
+                    }
+                    val filtered = remember(indexedCallable, callFilter, selectedLetter, m.callChoices) {
+                        if (m.callChoices.isNotEmpty()) m.callChoices
+                        else if (selectedLetter != null) {
+                            val l = selectedLetter!!.lowercase()
+                            indexedCallable.filter { (_, cleanName, _) -> cleanName.startsWith(l) }.map { it.first }
+                        } else if (callFilter.isBlank()) {
+                            allCallable
+                        } else {
+                            val q = normalized(callFilter)
+                            indexedCallable.filter { (_, _, blob) -> blob.contains(q) }.map { it.first }
+                        }
+                    }
+
                     if(allCallable.isEmpty()) {
                         Text("אין עדיין אנשי קשר. אשרו גישה לאנשי הקשר בטלפון או הוסיפו בהגדרות המשפחה.")
                     } else if (filtered.isEmpty()) {
                         Text("לא נמצא איש קשר תואם.")
-                    }
-                    filtered.take(30).forEach { person ->
-                        Action("${person.name} · ${person.phone}",Icons.Default.Call,secondary=true) { m.requestCall(person) }
+                    } else {
+                        Panel {
+                            filtered.take(40).forEachIndexed { idx, person ->
+                                if (idx > 0) HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            keyboard?.hide()
+                                            focusManager.clearFocus()
+                                            m.requestCall(person)
+                                        }
+                                        .padding(vertical = 10.dp, horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(person.name, style = MaterialTheme.typography.titleLarge)
+                                        Text(person.phone, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f))
+                                    }
+                                    Icon(
+                                        Icons.Default.Call,
+                                        contentDescription = "חיוג אל ${person.name}",
+                                        tint = ListeningGreen,
+                                        modifier = Modifier.size(30.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 Screen.MEDICATIONS -> {

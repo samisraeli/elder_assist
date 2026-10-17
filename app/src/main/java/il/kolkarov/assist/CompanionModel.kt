@@ -90,7 +90,8 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         is org.json.JSONException -> "השירות או הקובץ החזירו מידע שאינו תקין"
         else -> e.message?.takeIf { it.any { c -> c in 'א'..'ת' } } ?: "הפעולה לא הצליחה. בדקו את החיבור ואת הקובץ ונסו שוב"
     }
-    fun stop() { task?.cancel(); listening = false; output?.stop(); status = "ההקראה נעצרה" }
+    fun stop() { task?.cancel(); listening = false; output?.stop(); status = "מוכן להקשיב" }
+    fun quietStop() { task?.cancel(); listening = false; output?.stop(); status = "מוכן להקשיב" }
     fun ask(text: String, action: suspend () -> Unit) { confirmation = Confirmation(text,action); respond(text) }
     fun confirm() {
         val pending = confirmation ?: return
@@ -98,7 +99,7 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         confirmation = null; output?.stop()
         runTask { pending.action() }
     }
-    fun cancel() { confirmation = null; callChoices = emptyList(); listening = false; output?.stop(); status = "הפעולה בוטלה" }
+    fun cancel() { confirmation = null; callChoices = emptyList(); listening = false; output?.stop(); status = "מוכן להקשיב" }
     fun navigate(to: Screen) {
         confirmation = null; callChoices = emptyList(); listening = false; output?.stop()
         answer = ""; spokenAnswer = false; status = "מוכן להקשיב"
@@ -106,6 +107,70 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         if (to == Screen.AGENDA) loadAgenda()
         if (to == Screen.CALLS) loadPhoneContacts()
         if (to == Screen.SETTINGS) { loadCalendars(); loadPhoneContacts() }
+    }
+
+    fun matchPeople(rawQueries: List<String>, candidates: List<Person> = allCallablePeople()): List<Person> {
+        val queries = rawQueries.map {
+            normalized(it).replaceFirst(Regex("^(התקשר|תתקשר|התקשרי|תתקשרי|להתקשר|חייג|תחייג|חייגי|תחייגי|לחייג|שיחה|לדבר)( עם| אל)?( ל)? ?"), "")
+                .replace(Regex("^(עם |אל |ל)"), "").trim()
+        }.filter { it.isNotBlank() }.distinct()
+        if (queries.isEmpty()) return emptyList()
+
+        val exact = candidates.filter { p ->
+            val names = (listOf(p.name) + p.aliases.split(',', ';')).map { normalized(it) }.filter { it.isNotBlank() }
+            queries.any { q -> names.any { n -> n == q || n.split(' ').contains(q) } }
+        }
+        if (exact.isNotEmpty()) return exact
+
+        return candidates.filter { p ->
+            val names = (listOf(p.name) + p.aliases.split(',', ';')).map { normalized(it) }.filter { it.isNotBlank() }
+            queries.any { q ->
+                val qTokens = q.split(' ').filter { it.length >= 2 }
+                names.any { n -> n.contains(q) || q.contains(n) || (qTokens.isNotEmpty() && qTokens.all { t -> n.contains(t) || (t.length >= 3 && n.contains(t.drop(1))) }) }
+            }
+        }
+    }
+
+    fun commandCandidates(texts: List<String>) {
+        val first = texts.firstOrNull()?.trim().orEmpty()
+        if (first.isBlank()) return
+        transcript = first
+        status = "שמעתי: $first"
+        val now = LocalDateTime.now(ZoneId.of(profile.value.zone))
+
+        if (confirmation != null) {
+            for (t in texts) {
+                when (CommandParser.parse(t, now)) {
+                    Command.Confirm -> { confirm(); return }
+                    Command.Cancel, Command.Stop -> { cancel(); return }
+                    else -> {}
+                }
+            }
+            respond("ממתינה פעולה לאישור. אמרו כן או ביטול")
+            return
+        }
+
+        // First check if any recognized candidate is a Call command or matches a contact on CALLS/HOME screen
+        val parsedList = texts.map { it to CommandParser.parse(it, now) }
+        val callCmd = parsedList.firstNotNullOfOrNull { (_, cmd) -> (cmd as? Command.Call)?.name }
+        if (callCmd != null) {
+            findCallFromCandidates(texts)
+            return
+        }
+
+        val nonClarify = parsedList.firstOrNull { (_, cmd) -> cmd !is Command.Clarify }
+        if (nonClarify != null) {
+            command(nonClarify.first)
+            return
+        }
+
+        // If all parsed as Clarify (e.g., user just said a person's name on HOME or CALLS)
+        val matched = matchPeople(texts)
+        if (matched.isNotEmpty() || screen == Screen.CALLS) {
+            findCallFromCandidates(texts)
+        } else {
+            command(first)
+        }
     }
 
     fun command(text: String) {
@@ -139,26 +204,26 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
                 else requestDeleteReminder(matches.single())
             }
             is Command.Clarify -> {
-                val candidates = allCallablePeople()
-                val directMatch = if (trimmed.length >= 2) candidates.filter { p ->
-                    (listOf(p.name) + p.aliases.split(',', ';')).any { it.isNotBlank() && normalized(it) == trimmed }
-                } else emptyList()
-                if (directMatch.isNotEmpty()) findCall(text) else respond(command.message)
+                val matched = matchPeople(listOf(text))
+                if (matched.isNotEmpty()) findCallFromCandidates(listOf(text)) else respond(command.message)
             }
         }
     }
-    fun findCall(name: String) {
+
+    fun findCallFromCandidates(texts: List<String>) {
         screen = Screen.CALLS
-        val target = normalized(name).replace(Regex("^(אל |ל)"), "").trim()
-        val candidates = allCallablePeople()
-        val exact = candidates.filter { p -> (listOf(p.name) + p.aliases.split(',', ';')).any { it.isNotBlank() && normalized(it) == target } }
-        val matches = exact.ifEmpty { candidates.filter { p -> (listOf(p.name) + p.aliases.split(',', ';')).any { it.isNotBlank() && (normalized(it).contains(target) || target.contains(normalized(it))) } } }
+        val matches = matchPeople(texts)
+        val displayQuery = normalized(texts.firstOrNull().orEmpty())
+            .replaceFirst(Regex("^(התקשר|תתקשר|התקשרי|תתקשרי|להתקשר|חייג|תחייג|חייגי|תחייגי|לחייג|שיחה|לדבר)( עם| אל)?( ל)? ?"), "").trim()
+            .ifBlank { texts.firstOrNull().orEmpty() }
         when(matches.size) {
-            0 -> respond("לא נמצא איש קשר בשם $name", false)
+            0 -> respond("לא נמצא איש קשר בשם $displayQuery", false)
             1 -> requestCall(matches.single())
-            else -> { callChoices = matches; respond("נמצאו ${matches.size} אנשי קשר עבור $name. לחצו על השם הרצוי") }
+            else -> { callChoices = matches; respond("נמצאו ${matches.size} אנשי קשר עבור $displayQuery. לחצו על השם הרצוי") }
         }
     }
+
+    fun findCall(name: String) = findCallFromCandidates(listOf(name))
     fun requestCall(person: Person) {
         callChoices = emptyList()
         if(person.phone.isBlank()) { respond("לא הוגדר מספר טלפון עבור ${person.name}"); return }

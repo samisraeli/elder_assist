@@ -166,6 +166,7 @@ class DeviceContacts(private val context: Context) {
                     val name = c.getString(1)?.trim().orEmpty()
                     val rawPhone = c.getString(2)?.replace(Regex("[\\s()\\-]"), "").orEmpty()
                     if (name.isBlank() || rawPhone.isBlank()) continue
+                    if (name.startsWith("*") || name.startsWith("#")) continue
                     val key = "${normalized(name)}|$rawPhone"
                     if (seen.add(key)) {
                         add(Person(id = "device:$id:$rawPhone", name = name, phone = rawPhone))
