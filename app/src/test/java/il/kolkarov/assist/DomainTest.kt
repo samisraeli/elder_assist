@@ -64,4 +64,10 @@ class DomainTest {
         assertEquals(Triple(1,1,2024),PeopleImport.parseBirth("45292"))
         assertEquals(Triple(2,1,1904),PeopleImport.parseBirth("1",true))
     }
+    @Test fun crossLanguagePhoneticSkeletonMatchesHebrewAndEnglish() {
+        assertEquals(phoneticSkeleton("ג'סיקה"), phoneticSkeleton("jessica"))
+        assertEquals(phoneticSkeleton("גסיקה"), phoneticSkeleton("jessica"))
+        assertTrue(phoneticSkeleton("eladush").startsWith(phoneticSkeleton("אלעד")))
+        assertTrue(phoneticSkeleton("אלעדוש").startsWith(phoneticSkeleton("אלעד")))
+    }
 }

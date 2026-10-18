@@ -26,8 +26,58 @@ data class Weather(val text: String, val fetched: Instant)
 data class NewsResult(val items: List<NewsItem>, val warnings: List<String>, val fetched: Instant)
 
 fun normalized(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFD)
-    .replace(Regex("[\\u0591-\\u05C7]"), "").replace(Regex("[\"׳״?!.,]"), "")
+    .replace(Regex("[\\u0591-\\u05C7]"), "").replace(Regex("[\"׳״'’`?!.,]"), "")
     .trim().lowercase().replace(Regex("\\s+"), " ")
+
+fun phoneticSkeleton(word: String): String {
+    val w = normalized(word)
+    if (w.isEmpty()) return ""
+    val sb = StringBuilder()
+    var i = 0
+    while (i < w.length) {
+        val c = w[i]
+        val next = w.getOrNull(i + 1)
+        when {
+            c == 's' && next == 'h' -> { sb.append('S'); i += 2; continue }
+            c == 'c' && next == 'h' -> { sb.append('H'); i += 2; continue }
+            c == 't' && next == 'z' -> { sb.append('Z'); i += 2; continue }
+            c == 't' && next == 's' -> { sb.append('Z'); i += 2; continue }
+            c == 'p' && next == 'h' -> { sb.append('f'); i += 2; continue }
+            c == 't' && next == 'h' -> { sb.append('t'); i += 2; continue }
+            c == 'א' || c == 'ע' || c == 'ה' -> if (i == 0) sb.append('a')
+            c == 'ב' -> sb.append('b')
+            c == 'ג' -> sb.append('g')
+            c == 'ד' -> sb.append('d')
+            c == 'ו' -> sb.append('v')
+            c == 'ז' -> sb.append('z')
+            c == 'ח' || c == 'כ' || c == 'ך' -> sb.append('k')
+            c == 'ט' || c == 'ת' -> sb.append('t')
+            c == 'י' -> if (i == 0) sb.append('y')
+            c == 'ל' -> sb.append('l')
+            c == 'מ' || c == 'ם' -> sb.append('m')
+            c == 'נ' || c == 'ן' -> sb.append('n')
+            c == 'ס' -> sb.append('s')
+            c == 'פ' || c == 'ף' -> sb.append('p')
+            c == 'צ' || c == 'ץ' -> sb.append('Z')
+            c == 'ק' -> sb.append('k')
+            c == 'ר' -> sb.append('r')
+            c == 'ש' -> sb.append('s')
+            c in listOf('a', 'e', 'i', 'o', 'u') -> if (i == 0) sb.append('a')
+            c == 'c' || c == 'q' || c == 'k' -> sb.append('k')
+            c == 'j' || c == 'g' -> sb.append('g')
+            c == 'v' || c == 'w' -> sb.append('v')
+            c == 'f' || c == 'p' -> sb.append('p')
+            c == 'y' -> if (i == 0) sb.append('y')
+            c == 'z' -> sb.append('z')
+            c == 's' -> sb.append('s')
+            c == 'x' -> sb.append("ks")
+            c in 'a'..'z' -> sb.append(c)
+            c in '0'..'9' -> sb.append(c)
+        }
+        i++
+    }
+    return sb.toString().replace(Regex("(.)\\1+"), "$1")
+}
 
 fun nextBirthday(month: Int, day: Int, today: LocalDate): LocalDate {
     fun date(year: Int): LocalDate = if (month == 2 && day == 29 && !Year.isLeap(year.toLong()))

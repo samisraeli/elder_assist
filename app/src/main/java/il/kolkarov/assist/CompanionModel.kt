@@ -114,28 +114,43 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun matchPeople(rawQueries: List<String>, candidates: List<Person> = allCallablePeople()): List<Person> {
-        val queries = rawQueries.map {
+        val baseQueries = rawQueries.map {
             normalized(it).replaceFirst(Regex("^(התקשר|תתקשר|התקשרי|תתקשרי|להתקשר|חייג|תחייג|חייגי|תחייגי|לחייג|שיחה|לדבר)( עם| אל)?( ל)? ?"), "")
-                .replace(Regex("^(עם |אל |ל)"), "").trim()
-        }.filter { it.isNotBlank() }.distinct()
+                .replace(Regex("^(עם |אל )"), "").trim()
+        }.filter { it.isNotBlank() }
+
+        // Expand queries to also include versions without leading 'ל' (e.g., "לאלעד" -> "אלעד", "לליאור" -> "ליאור")
+        val queries = baseQueries.flatMap { q ->
+            val withoutLamed = if (q.startsWith("ל") && q.length >= 3) q.drop(1).trim() else null
+            listOfNotNull(q, withoutLamed)
+        }.distinct()
         if (queries.isEmpty()) return emptyList()
 
-        // Score each candidate:
-        // 4 = exact full name or alias match
-        // 3 = exact word match inside name/alias
-        // 2 = word in name/alias starts with query (e.g. "אלעד" matches "Eladush אלעדוש")
-        // 1 = substring match anywhere in name/alias
         val scored = candidates.mapNotNull { p ->
             val names = (listOf(p.name) + p.aliases.split(',', ';')).map { normalized(it) }.filter { it.isNotBlank() }
-            val words = names.flatMap { it.split(Regex("[\\s\\-_.;,/]+")) }.filter { it.isNotBlank() }
+            val words = names.flatMap { it.split(Regex("[\\s\\-_.;,/()]+")) }.filter { it.isNotBlank() }
+            val wordSkeletons = words.map { phoneticSkeleton(it) }.filter { it.isNotBlank() }
             var bestScore = 0
             for (q in queries) {
-                val qWords = q.split(' ').filter { it.isNotBlank() }
+                val qWords = q.split(Regex("[\\s\\-_.;,/()]+")).filter { it.isNotBlank() }
+                val qSkel = phoneticSkeleton(q)
+                val qWordSkels = qWords.map { phoneticSkeleton(it) }.filter { it.length >= 2 }
+
                 val score = when {
-                    names.any { it == q } -> 4
-                    words.any { it == q } -> 3
-                    words.any { it.startsWith(q) || (q.length >= 3 && it.startsWith(q.drop(1))) } -> 2
-                    names.any { n -> n.contains(q) || q.contains(n) || (qWords.isNotEmpty() && qWords.all { qw -> n.contains(qw) || (qw.length >= 3 && n.contains(qw.drop(1))) }) } -> 1
+                    // 5: Exact full name/alias match
+                    names.any { it == q } -> 5
+                    // 4: Exact word match in name/alias
+                    words.any { it == q } -> 4
+                    // 3: Word in name starts with query (e.g., "אלעד" matches "אלעדוש") or exact phonetic word match ("גסיקה" == "jessica")
+                    words.any { it.startsWith(q) && q.length >= 2 } ||
+                        (qSkel.length >= 2 && wordSkeletons.any { it == qSkel }) ||
+                        (qWordSkels.isNotEmpty() && qWordSkels.all { qs -> wordSkeletons.any { ws -> ws == qs } }) -> 3
+                    // 2: Phonetic prefix match (e.g., "אלעד" -> "ald" prefix of "eladush" -> "aldS", or "גסי" -> "gsy" prefix of "jessica")
+                    (qSkel.length >= 2 && wordSkeletons.any { it.startsWith(qSkel) }) ||
+                        (qWordSkels.isNotEmpty() && qWordSkels.all { qs -> wordSkeletons.any { ws -> ws.startsWith(qs) } }) -> 2
+                    // 1: Substring match in text or phonetic skeleton
+                    names.any { n -> n.contains(q) || (q.length >= 3 && q.contains(n)) } ||
+                        (qSkel.length >= 3 && wordSkeletons.any { it.contains(qSkel) }) -> 1
                     else -> 0
                 }
                 if (score > bestScore) bestScore = score
@@ -143,10 +158,12 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
             if (bestScore > 0) Triple(p, bestScore, p.favorite) else null
         }
 
-        val maxScore = scored.maxOfOrNull { it.second } ?: return emptyList()
-        // If there is a exact match (score 4), prefer score >= 2 so nicknames like "אלעדוש" are also included if relevant, or return sorted by score & favorite
+        if (scored.isEmpty()) return emptyList()
+        // Include all strong matches (score >= 2, or score >= 1 if no stronger match exists) so nicknames like "אלעדוש" are always shown alongside "אלעד"
+        val maxScore = scored.maxOf { it.second }
+        val threshold = if (maxScore >= 2) 2 else 1
         return scored
-            .filter { if (maxScore == 4) it.second >= 3 else it.second >= 1 }
+            .filter { it.second >= threshold }
             .sortedWith(compareByDescending<Triple<Person, Int, Boolean>> { it.second }.thenByDescending { it.third }.thenBy { it.first.name.lowercase() })
             .map { it.first }
     }
