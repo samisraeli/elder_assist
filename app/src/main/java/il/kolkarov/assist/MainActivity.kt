@@ -27,8 +27,13 @@ class MainActivity : ComponentActivity() {
     private val speechDialog = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         model.listening = false
         val list = res.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.filter { it.isNotBlank() }.orEmpty()
-        if (list.isNotEmpty()) model.commandCandidates(list)
-        else model.status = "מוכן להקשיב"
+        if (list.isNotEmpty()) {
+            model.processingVoice = true
+            model.commandCandidates(list)
+        } else {
+            model.processingVoice = false
+            model.status = "מוכן להקשיב"
+        }
     }
     private val phone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         pendingCall?.let { person -> pendingCall = null; openCall(person,granted) }
@@ -78,9 +83,11 @@ class MainActivity : ComponentActivity() {
             context = this,
             state = { model.status = it },
             onListening = { model.listening = it },
+            onProcessing = { model.processingVoice = it },
             fallbackDialog = { intent ->
                 runCatching { speechDialog.launch(intent) }.onFailure {
                     model.listening = false
+                    model.processingVoice = false
                     model.status = "אין שירות זיהוי דיבור במכשיר"
                 }
             },

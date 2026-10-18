@@ -179,8 +179,9 @@ enum class SettingsArea(val label: String) {
         }
     }
     LaunchedEffect(m.screen,settingsArea) { pageScroll.scrollTo(0) }
-    val canStop = m.listening || speech.speaking || m.busy
+    val canStop = m.listening || m.processingVoice || speech.speaking || m.busy
     val quietStatuses = setOf("מוכן להקשיב", "הפעולה בוטלה", "ההקראה נעצרה")
+    val checkingOrange = Color(0xFFD97706)
     Scaffold(containerColor=MaterialTheme.colorScheme.background,
         topBar = {
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal=16.dp,vertical=8.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -233,16 +234,20 @@ enum class SettingsArea(val label: String) {
         }
     ) { padding ->
         Column(Modifier.padding(padding).verticalScroll(pageScroll).padding(horizontal=18.dp,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
-            if (m.listening || m.busy || speech.speaking || (m.status.isNotBlank() && m.status !in quietStatuses)) {
+            if (m.listening || m.processingVoice || m.busy || speech.speaking || (m.status.isNotBlank() && m.status !in quietStatuses)) {
                 Text(
                     m.status,
                     Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                    color = if (m.listening) ListeningGreen else MaterialTheme.colorScheme.primary,
+                    color = when {
+                        m.listening -> ListeningGreen
+                        m.processingVoice -> checkingOrange
+                        else -> MaterialTheme.colorScheme.primary
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
                 )
             }
-            if(m.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if(m.busy || m.processingVoice) LinearProgressIndicator(Modifier.fillMaxWidth())
             when(m.screen) {
                 Screen.HOME -> {
                     Text(if(p.name.isBlank()) "שלום, טוב שבאת" else "שלום, ${p.name}",style=MaterialTheme.typography.headlineMedium)
@@ -253,21 +258,52 @@ enum class SettingsArea(val label: String) {
                         Button(
                             onClick = listen,
                             modifier = Modifier.size(diameter),
-                            enabled = !m.busy,
+                            enabled = !m.busy && !m.processingVoice,
                             shape = CircleShape,
-                            colors = if (m.listening) ButtonDefaults.buttonColors(containerColor = ListeningGreen, contentColor = Color.White)
-                                     else ButtonDefaults.buttonColors(),
+                            colors = when {
+                                m.listening -> ButtonDefaults.buttonColors(containerColor = ListeningGreen, contentColor = Color.White)
+                                m.processingVoice -> ButtonDefaults.buttonColors(
+                                    containerColor = checkingOrange,
+                                    contentColor = Color.White,
+                                    disabledContainerColor = checkingOrange,
+                                    disabledContentColor = Color.White
+                                )
+                                else -> ButtonDefaults.buttonColors()
+                            },
                             contentPadding = PaddingValues(8.dp)
                         ) {
                             Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
-                                Icon(Icons.Default.Mic,null,Modifier.size(32.dp))
+                                if (m.processingVoice) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(28.dp),
+                                        color = Color.White,
+                                        strokeWidth = 3.dp
+                                    )
+                                } else {
+                                    Icon(Icons.Default.Mic,null,Modifier.size(32.dp))
+                                }
                                 Spacer(Modifier.height(4.dp))
-                                Text(if (m.listening) "מקשיב..." else "דבר איתי",fontSize=18.sp,fontWeight=FontWeight.Bold,textAlign=TextAlign.Center)
+                                Text(
+                                    when {
+                                        m.listening -> "מקשיב..."
+                                        m.processingVoice -> "בודק..."
+                                        else -> "דבר איתי"
+                                    },
+                                    fontSize=18.sp,fontWeight=FontWeight.Bold,textAlign=TextAlign.Center
+                                )
                             }
                         }
                         Text(
-                            if (m.listening) "דברו עכשיו – לחצו שוב לעצירה" else "לחצו ואמרו מה תרצו",
-                            color = if (m.listening) ListeningGreen else MaterialTheme.colorScheme.onSurface,
+                            when {
+                                m.listening -> "דברו עכשיו – לחצו שוב לעצירה"
+                                m.processingVoice -> "מחפש ובודק את הבקשה..."
+                                else -> "לחצו ואמרו מה תרצו"
+                            },
+                            color = when {
+                                m.listening -> ListeningGreen
+                                m.processingVoice -> checkingOrange
+                                else -> MaterialTheme.colorScheme.onSurface
+                            },
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
@@ -334,10 +370,14 @@ enum class SettingsArea(val label: String) {
                 Screen.CALLS -> {
                     Heading("למי להתקשר?")
                     Action(
-                        text = if (m.listening) "מקשיב לשם איש הקשר... (לחצו לעצירה)" else "חיפוש בקול (אמרו שם)",
-                        icon = Icons.Default.Mic,
-                        enabled = !m.busy,
-                        active = m.listening,
+                        text = when {
+                            m.listening -> "מקשיב לשם איש הקשר... (לחצו לעצירה)"
+                            m.processingVoice -> "בודק ומחפש איש קשר..."
+                            else -> "חיפוש בקול (אמרו שם)"
+                        },
+                        icon = if (m.processingVoice) Icons.Default.Search else Icons.Default.Mic,
+                        enabled = !m.busy && !m.processingVoice,
+                        active = m.listening || m.processingVoice,
                         onClick = {
                             callFilter = ""
                             debouncedQuery = ""
@@ -533,7 +573,7 @@ enum class SettingsArea(val label: String) {
                     }
                 }
                 Screen.SETTINGS -> {
-                    Heading("הגדרות למשפחה (גרסה 0.9)")
+                    Heading("הגדרות למשפחה (גרסה 1.0)")
                     if(settingsArea==null) {
                         Text("בחרו מה להגדיר:")
                         SettingsArea.entries.forEach { area -> Action(area.label,Icons.Default.ChevronLeft,secondary=area!=SettingsArea.FEATURES) { settingsArea=area } }

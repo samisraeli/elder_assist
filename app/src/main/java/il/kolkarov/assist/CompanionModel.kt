@@ -26,6 +26,7 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
     var screen by mutableStateOf(Screen.HOME)
     var status by mutableStateOf("מוכן להקשיב")
     var listening by mutableStateOf(false)
+    var processingVoice by mutableStateOf(false)
     var transcript by mutableStateOf("")
     var answer by mutableStateOf("")
     var spokenAnswer by mutableStateOf(false)
@@ -95,8 +96,8 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         is org.json.JSONException -> "השירות או הקובץ החזירו מידע שאינו תקין"
         else -> e.message?.takeIf { it.any { c -> c in 'א'..'ת' } } ?: "הפעולה לא הצליחה. בדקו את החיבור ואת הקובץ ונסו שוב"
     }
-    fun stop() { task?.cancel(); listening = false; output?.stop(); status = "מוכן להקשיב" }
-    fun quietStop() { task?.cancel(); listening = false; output?.stop(); status = "מוכן להקשיב" }
+    fun stop() { task?.cancel(); listening = false; processingVoice = false; output?.stop(); status = "מוכן להקשיב" }
+    fun quietStop() { task?.cancel(); listening = false; processingVoice = false; output?.stop(); status = "מוכן להקשיב" }
     fun ask(text: String, action: suspend () -> Unit) { confirmation = Confirmation(text,action); respond(text) }
     fun confirm() {
         val pending = confirmation ?: return
@@ -104,9 +105,9 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         confirmation = null; output?.stop()
         runTask { pending.action() }
     }
-    fun cancel() { confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; listening = false; output?.stop(); status = "מוכן להקשיב" }
+    fun cancel() { confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; listening = false; processingVoice = false; output?.stop(); status = "מוכן להקשיב" }
     fun navigate(to: Screen) {
-        confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; listening = false; output?.stop()
+        confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; listening = false; processingVoice = false; output?.stop()
         answer = ""; spokenAnswer = false; status = "מוכן להקשיב"
         screen = to
         if (to == Screen.AGENDA) loadAgenda()
@@ -151,15 +152,15 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
                     names.any { it == q } -> 6
                     // 5: Exact word match in name/alias
                     words.any { it == q } -> 5
-                    // 4: Any word in name starts with query (e.g., "אלעד" in "Eladush אלעדוש") or direct substring in name
-                    words.any { it.startsWith(q) } || fullText.contains(q) ||
-                        (qWords.isNotEmpty() && qWords.all { qw -> words.any { w -> w.contains(qw) } || fullText.contains(qw) }) -> 4
+                    // 4: Any word in name starts with query (e.g., "אלעד" in "Eladush אלעדוש") or direct substring in name (min 2 chars)
+                    (q.length >= 2 && (words.any { it.startsWith(q) } || fullText.contains(q))) ||
+                        (qWords.isNotEmpty() && qWords.all { qw -> qw.length >= 2 && (words.any { w -> w.contains(qw) } || fullText.contains(qw)) }) -> 4
                     // 3: Exact phonetic word match ("גסיקה" == "jessica", "אלעד" == "elad")
                     (qSkel.length >= 2 && wordSkeletons.any { it == qSkel }) ||
                         (qWordSkels.isNotEmpty() && qWordSkels.all { qs -> wordSkeletons.any { ws -> ws == qs } }) -> 3
-                    // 2: Phonetic prefix/substring match (e.g., "אלעד" -> "ald" prefix of "eladush" -> "alds")
-                    (qSkel.length >= 2 && wordSkeletons.any { it.startsWith(qSkel) || (qSkel.length >= 3 && it.contains(qSkel)) }) ||
-                        (qWordSkels.isNotEmpty() && qWordSkels.all { qs -> wordSkeletons.any { ws -> ws.startsWith(qs) || (qs.length >= 3 && ws.contains(qs)) } }) -> 2
+                    // 2: Phonetic prefix match (min 3 phonetic chars so "אלעד" -> "ald" matches "eladush" -> "alds", but 2-char "אל" -> "al" doesn't match 70 contacts!)
+                    (qSkel.length >= 3 && wordSkeletons.any { it.startsWith(qSkel) || it.contains(qSkel) }) ||
+                        (qWordSkels.isNotEmpty() && qWordSkels.all { qs -> qs.length >= 3 && wordSkeletons.any { ws -> ws.startsWith(qs) || ws.contains(qs) } }) -> 2
                     else -> 0
                 }
                 if (score > bestScore) bestScore = score
@@ -180,12 +181,17 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
 
     fun commandCandidates(texts: List<String>) {
         val first = texts.firstOrNull()?.trim().orEmpty()
-        if (first.isBlank()) return
+        if (first.isBlank()) {
+            processingVoice = false
+            return
+        }
+        processingVoice = true
         transcript = first
-        status = "שמעתי: $first"
+        status = "בודק: $first..."
         val now = LocalDateTime.now(ZoneId.of(profile.value.zone))
 
         if (confirmation != null) {
+            processingVoice = false
             for (t in texts) {
                 when (CommandParser.parse(t, now)) {
                     Command.Confirm -> { confirm(); return }
@@ -207,6 +213,7 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
 
         val nonClarify = parsedList.firstOrNull { (_, cmd) -> cmd !is Command.Clarify }
         if (nonClarify != null) {
+            processingVoice = false
             command(nonClarify.first)
             return
         }
@@ -221,6 +228,7 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
             if (matched.isNotEmpty()) {
                 findCallFromCandidates(texts, matched)
             } else {
+                processingVoice = false
                 command(first)
             }
         }
@@ -230,6 +238,7 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         transcript = text
         val trimmed = normalized(text)
         if (confirmation != null) {
+            processingVoice = false
             val command = CommandParser.parse(text,LocalDateTime.now(ZoneId.of(profile.value.zone)))
             when(command) { Command.Confirm -> confirm(); Command.Cancel, Command.Stop -> cancel(); else -> respond("ממתינה פעולה לאישור. אמרו כן או ביטול") }
             return
@@ -240,18 +249,19 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
             return
         }
         when(command) {
-            Command.Confirm -> respond("אין פעולה שממתינה לאישור")
+            Command.Confirm -> { processingVoice = false; respond("אין פעולה שממתינה לאישור") }
             Command.Cancel -> cancel()
             Command.Stop -> stop()
-            Command.Repeat -> output?.say(answer,profile.value)
-            Command.Morning -> morning()
-            Command.WeatherNow -> getWeather()
-            Command.Medications -> { screen=Screen.MEDICATIONS; loadAgenda(); respond(medicationText()) }
-            is Command.News -> loadNews(command.topic,true)
-            is Command.Agenda -> loadAgenda(true,command.birthdaysOnly,command.todayOnly)
+            Command.Repeat -> { processingVoice = false; output?.say(answer,profile.value) }
+            Command.Morning -> { processingVoice = false; morning() }
+            Command.WeatherNow -> { processingVoice = false; getWeather() }
+            Command.Medications -> { processingVoice = false; screen=Screen.MEDICATIONS; loadAgenda(); respond(medicationText()) }
+            is Command.News -> { processingVoice = false; loadNews(command.topic,true) }
+            is Command.Agenda -> { processingVoice = false; loadAgenda(true,command.birthdaysOnly,command.todayOnly) }
             is Command.Call -> findCall(command.name)
-            is Command.Remind -> requestReminder(command.title,command.at)
+            is Command.Remind -> { processingVoice = false; requestReminder(command.title,command.at) }
             is Command.CancelReminder -> {
+                processingVoice = false
                 val matches = reminders.value.filter { !it.delivered && normalized(it.title).contains(normalized(command.title)) }
                 if(command.title.isBlank() || matches.size != 1) { screen = Screen.AGENDA; loadAgenda(); respond("בחרו תזכורת מהרשימה כדי לבטל אותה") }
                 else requestDeleteReminder(matches.single())
@@ -259,7 +269,8 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
             is Command.Clarify -> {
                 viewModelScope.launch {
                     val matched = withContext(Dispatchers.Default) { matchPeople(listOf(text)) }
-                    if (matched.isNotEmpty()) findCallFromCandidates(listOf(text), matched) else respond(command.message)
+                    if (matched.isNotEmpty()) findCallFromCandidates(listOf(text), matched)
+                    else { processingVoice = false; respond(command.message) }
                 }
             }
         }
@@ -275,23 +286,19 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         } else {
             rawCleaned
         }
-        voiceSearchQuery = displayQuery
-        screen = Screen.CALLS
+        processingVoice = true
+        status = "מחפש את $displayQuery..."
         viewModelScope.launch {
             val matches = precomputedMatches ?: withContext(Dispatchers.Default) { matchPeople(texts) }
+            voiceSearchQuery = displayQuery
+            callChoices = matches
+            processingVoice = false
+            status = "שמעתי: ${texts.firstOrNull().orEmpty()}"
+            screen = Screen.CALLS
             when(matches.size) {
-                0 -> {
-                    callChoices = emptyList()
-                    respond("לא נמצא איש קשר בשם $displayQuery", false)
-                }
-                1 -> {
-                    callChoices = matches
-                    requestCall(matches.single())
-                }
-                else -> {
-                    callChoices = matches
-                    respond("נמצאו ${matches.size} אנשי קשר עבור $displayQuery. לחצו על השם הרצוי")
-                }
+                0 -> respond("לא נמצא איש קשר בשם $displayQuery", false)
+                1 -> requestCall(matches.single())
+                else -> respond("נמצאו ${matches.size} אנשי קשר עבור $displayQuery. לחצו על השם הרצוי")
             }
         }
     }

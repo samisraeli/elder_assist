@@ -58,6 +58,7 @@ class VoiceInput(
     private val context: Context,
     private val state: (String) -> Unit,
     private val onListening: (Boolean) -> Unit,
+    private val onProcessing: (Boolean) -> Unit = {},
     private val fallbackDialog: (Intent) -> Unit,
     private val result: (List<String>) -> Unit
 ) {
@@ -72,20 +73,21 @@ class VoiceInput(
             rec.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
                     val s = generation
-                    handler.post { if (s == generation) { onListening(true); state("מקשיב… דברו עכשיו") } }
+                    handler.post { if (s == generation) { onProcessing(false); onListening(true); state("מקשיב… דברו עכשיו") } }
                 }
                 override fun onBeginningOfSpeech() {}
                 override fun onRmsChanged(rmsdB: Float) {}
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {
                     val s = generation
-                    handler.post { if (s == generation) { onListening(false); state("מעבד את הבקשה…") } }
+                    handler.post { if (s == generation) { onListening(false); onProcessing(true); state("בודק…") } }
                 }
                 override fun onError(error: Int) {
                     val s = generation
                     handler.post {
                         if (s != generation) return@post
                         onListening(false)
+                        onProcessing(false)
                         if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
                             runCatching { rec.cancel() }
                         }
@@ -106,7 +108,13 @@ class VoiceInput(
                     handler.post {
                         if (s != generation) return@post
                         onListening(false)
-                        if (list.isEmpty()) state("לא שמעתי בבירור") else result(list)
+                        if (list.isEmpty()) {
+                            onProcessing(false)
+                            state("לא שמעתי בבירור")
+                        } else {
+                            onProcessing(true)
+                            result(list)
+                        }
                     }
                 }
                 override fun onPartialResults(partialResults: Bundle?) {}
@@ -130,9 +138,11 @@ class VoiceInput(
         val speechIntent = buildIntent(language)
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             onListening(false)
+            onProcessing(false)
             fallbackDialog(speechIntent)
             return
         }
+        onProcessing(false)
         onListening(true)
         state("מקשיב… דברו עכשיו")
         handler.post {
@@ -143,11 +153,12 @@ class VoiceInput(
                 rec.startListening(speechIntent)
             }.onFailure {
                 onListening(false)
+                onProcessing(false)
                 fallbackDialog(speechIntent)
             }
         }
     }
-    fun cancel() { generation++; onListening(false); handler.post { runCatching { recognizer?.cancel() } } }
-    fun close() { generation++; onListening(false); handler.post { runCatching { recognizer?.destroy() }; recognizer = null } }
+    fun cancel() { generation++; onListening(false); onProcessing(false); handler.post { runCatching { recognizer?.cancel() } } }
+    fun close() { generation++; onListening(false); onProcessing(false); handler.post { runCatching { recognizer?.destroy() }; recognizer = null } }
 }
 
