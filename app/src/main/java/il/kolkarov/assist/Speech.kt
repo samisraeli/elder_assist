@@ -60,30 +60,45 @@ class VoiceInput(
     private val onListening: (Boolean) -> Unit,
     private val onProcessing: (Boolean) -> Unit = {},
     private val fallbackDialog: (Intent) -> Unit,
-    private val result: (List<String>) -> Unit
+    private val result: (List<String>) -> Unit,
+    private val recognizerFactory: () -> SpeechRecognizer = { SpeechRecognizer.createSpeechRecognizer(context.applicationContext) },
+    private val recognitionAvailable: () -> Boolean = { SpeechRecognizer.isRecognitionAvailable(context) }
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
+    private var inFlight = false
     private var generation = 0
 
-    private fun ensureRecognizer(): SpeechRecognizer {
-        recognizer?.let { return it }
-        return SpeechRecognizer.createSpeechRecognizer(context.applicationContext).also { recognizer = it }
+    private fun obtainRecognizer(): SpeechRecognizer {
+        val existing = recognizer
+        if (existing != null && !inFlight) {
+            return existing
+        }
+        if (existing != null) {
+            // Previous session was cancelled while in flight; detach its listener and retire it so late IPC events cannot leak into the new session
+            recognizer = null
+            inFlight = false
+            runCatching { existing.setRecognitionListener(null) }
+            runCatching { existing.cancel() }
+            handler.postDelayed({ runCatching { existing.destroy() } }, 400)
+        }
+        return recognizerFactory().also { recognizer = it }
     }
 
     private fun listenerForSession(session: Int, rec: SpeechRecognizer) = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
-            handler.post { if (session == generation) { onProcessing(false); onListening(true); state("מקשיב… דברו עכשיו") } }
+            handler.post { if (session == generation && rec === recognizer) { onProcessing(false); onListening(true); state("מקשיב… דברו עכשיו") } }
         }
         override fun onBeginningOfSpeech() {}
         override fun onRmsChanged(rmsdB: Float) {}
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {
-            handler.post { if (session == generation) { onListening(false); onProcessing(true); state("בודק…") } }
+            handler.post { if (session == generation && rec === recognizer) { onListening(false); onProcessing(true); state("בודק…") } }
         }
         override fun onError(error: Int) {
             handler.post {
-                if (session != generation) return@post
+                if (rec === recognizer) inFlight = false
+                if (session != generation || rec !== recognizer) return@post
                 onListening(false)
                 onProcessing(false)
                 if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
@@ -103,7 +118,8 @@ class VoiceInput(
         override fun onResults(results: Bundle?) {
             val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.filter { it.isNotBlank() }.orEmpty()
             handler.post {
-                if (session != generation) return@post
+                if (rec === recognizer) inFlight = false
+                if (session != generation || rec !== recognizer) return@post
                 onListening(false)
                 if (list.isEmpty()) {
                     onProcessing(false)
@@ -131,7 +147,7 @@ class VoiceInput(
         lastLanguage = language
         val session = ++generation
         val speechIntent = buildIntent(language)
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+        if (!recognitionAvailable()) {
             onListening(false)
             onProcessing(false)
             fallbackDialog(speechIntent)
@@ -143,11 +159,12 @@ class VoiceInput(
         handler.post {
             if (session != generation) return@post
             runCatching {
-                val rec = ensureRecognizer()
-                rec.cancel()
+                val rec = obtainRecognizer()
+                inFlight = true
                 rec.setRecognitionListener(listenerForSession(session, rec))
                 rec.startListening(speechIntent)
             }.onFailure {
+                inFlight = false
                 if (session == generation) {
                     onListening(false)
                     onProcessing(false)
@@ -156,7 +173,34 @@ class VoiceInput(
             }
         }
     }
-    fun cancel() { generation++; onListening(false); onProcessing(false); handler.post { runCatching { recognizer?.cancel() } } }
-    fun close() { generation++; onListening(false); onProcessing(false); handler.post { runCatching { recognizer?.destroy() }; recognizer = null } }
+
+    fun cancel() {
+        generation++
+        onListening(false)
+        onProcessing(false)
+        handler.post {
+            val existing = recognizer ?: return@post
+            if (inFlight) {
+                recognizer = null
+                inFlight = false
+                runCatching { existing.setRecognitionListener(null) }
+                runCatching { existing.cancel() }
+                handler.postDelayed({ runCatching { existing.destroy() } }, 400)
+            }
+        }
+    }
+
+    fun close() {
+        generation++
+        onListening(false)
+        onProcessing(false)
+        handler.post {
+            val existing = recognizer
+            recognizer = null
+            inFlight = false
+            runCatching { existing?.setRecognitionListener(null) }
+            runCatching { existing?.destroy() }
+        }
+    }
 }
 

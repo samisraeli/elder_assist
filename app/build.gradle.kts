@@ -16,8 +16,8 @@ android {
         applicationId = "il.kolkarov.assist"
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.1.0"
+        versionCode = 12
+        versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     if (signing.isNotEmpty()) signingConfigs.create("family") {

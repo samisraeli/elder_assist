@@ -589,7 +589,7 @@ enum class SettingsArea(val label: String) {
                     }
                 }
                 Screen.SETTINGS -> {
-                    Heading("הגדרות למשפחה (גרסה 1.1)")
+                    Heading("הגדרות למשפחה (גרסה 1.2)")
                     if(settingsArea==null) {
                         Text("בחרו מה להגדיר:")
                         SettingsArea.entries.forEach { area -> Action(area.label,Icons.Default.ChevronLeft,secondary=area!=SettingsArea.FEATURES) { settingsArea=area } }
