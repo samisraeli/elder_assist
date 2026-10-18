@@ -69,5 +69,9 @@ class DomainTest {
         assertEquals(phoneticSkeleton("גסיקה"), phoneticSkeleton("jessica"))
         assertTrue(phoneticSkeleton("eladush").startsWith(phoneticSkeleton("אלעד")))
         assertTrue(phoneticSkeleton("אלעדוש").startsWith(phoneticSkeleton("אלעד")))
+        val words = extractWords("Eladush  \u200Fאלעדוש")
+        assertTrue(words.contains("eladush"))
+        assertTrue(words.contains("אלעדוש"))
+        assertTrue(words.any { it.startsWith("אלעד") })
     }
 }

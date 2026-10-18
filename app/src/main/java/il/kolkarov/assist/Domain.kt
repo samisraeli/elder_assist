@@ -25,9 +25,13 @@ data class Place(val name: String, val country: String, val latitude: Double, va
 data class Weather(val text: String, val fetched: Instant)
 data class NewsResult(val items: List<NewsItem>, val warnings: List<String>, val fetched: Instant)
 
-fun normalized(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFD)
-    .replace(Regex("[\\u0591-\\u05C7]"), "").replace(Regex("[\"׳״'’`?!.,]"), "")
+fun normalized(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFKC)
+    .replace(Regex("[\\u0591-\\u05C7\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF]"), "")
+    .replace(Regex("[\"׳״'’`?!.,]"), "")
     .trim().lowercase().replace(Regex("\\s+"), " ")
+
+fun extractWords(value: String): List<String> =
+    Regex("[א-ת]+|[a-z0-9]+").findAll(normalized(value)).map { it.value }.filter { it.isNotBlank() }.toList()
 
 fun phoneticSkeleton(word: String): String {
     val w = normalized(word)
@@ -38,38 +42,35 @@ fun phoneticSkeleton(word: String): String {
         val c = w[i]
         val next = w.getOrNull(i + 1)
         when {
-            c == 's' && next == 'h' -> { sb.append('S'); i += 2; continue }
-            c == 'c' && next == 'h' -> { sb.append('H'); i += 2; continue }
-            c == 't' && next == 'z' -> { sb.append('Z'); i += 2; continue }
-            c == 't' && next == 's' -> { sb.append('Z'); i += 2; continue }
-            c == 'p' && next == 'h' -> { sb.append('f'); i += 2; continue }
+            c == 's' && next == 'h' -> { sb.append('s'); i += 2; continue }
+            c == 'c' && next == 'h' -> { sb.append('k'); i += 2; continue }
+            c == 't' && next == 'z' -> { sb.append('z'); i += 2; continue }
+            c == 't' && next == 's' -> { sb.append('z'); i += 2; continue }
+            c == 'p' && next == 'h' -> { sb.append('p'); i += 2; continue }
             c == 't' && next == 'h' -> { sb.append('t'); i += 2; continue }
-            c == 'א' || c == 'ע' || c == 'ה' -> if (i == 0) sb.append('a')
+            c == 'א' || c == 'ע' || c == 'ה' -> if (sb.isEmpty()) sb.append('a')
             c == 'ב' -> sb.append('b')
             c == 'ג' -> sb.append('g')
             c == 'ד' -> sb.append('d')
-            c == 'ו' -> sb.append('v')
+            c == 'ו' -> if (sb.isEmpty()) sb.append('v')
             c == 'ז' -> sb.append('z')
-            c == 'ח' || c == 'כ' || c == 'ך' -> sb.append('k')
+            c == 'ח' || c == 'כ' || c == 'ך' || c == 'ק' -> sb.append('k')
             c == 'ט' || c == 'ת' -> sb.append('t')
-            c == 'י' -> if (i == 0) sb.append('y')
+            c == 'י' -> if (sb.isEmpty()) sb.append('y')
             c == 'ל' -> sb.append('l')
             c == 'מ' || c == 'ם' -> sb.append('m')
             c == 'נ' || c == 'ן' -> sb.append('n')
-            c == 'ס' -> sb.append('s')
+            c == 'ס' || c == 'ש' -> sb.append('s')
             c == 'פ' || c == 'ף' -> sb.append('p')
-            c == 'צ' || c == 'ץ' -> sb.append('Z')
-            c == 'ק' -> sb.append('k')
+            c == 'צ' || c == 'ץ' -> sb.append('z')
             c == 'ר' -> sb.append('r')
-            c == 'ש' -> sb.append('s')
-            c in listOf('a', 'e', 'i', 'o', 'u') -> if (i == 0) sb.append('a')
+            c in listOf('a', 'e', 'i', 'o', 'u') -> if (sb.isEmpty()) sb.append('a')
             c == 'c' || c == 'q' || c == 'k' -> sb.append('k')
             c == 'j' || c == 'g' -> sb.append('g')
             c == 'v' || c == 'w' -> sb.append('v')
             c == 'f' || c == 'p' -> sb.append('p')
-            c == 'y' -> if (i == 0) sb.append('y')
-            c == 'z' -> sb.append('z')
-            c == 's' -> sb.append('s')
+            c == 'y' -> if (sb.isEmpty()) sb.append('y')
+            c == 'z' || c == 's' -> sb.append('s').let { if (c == 'z') { sb.setCharAt(sb.length - 1, 'z') } }
             c == 'x' -> sb.append("ks")
             c in 'a'..'z' -> sb.append(c)
             c in '0'..'9' -> sb.append(c)

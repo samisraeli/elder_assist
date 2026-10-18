@@ -128,29 +128,29 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
 
         val scored = candidates.mapNotNull { p ->
             val names = (listOf(p.name) + p.aliases.split(',', ';')).map { normalized(it) }.filter { it.isNotBlank() }
-            val words = names.flatMap { it.split(Regex("[\\s\\-_.;,/()]+")) }.filter { it.isNotBlank() }
+            val fullText = names.joinToString(" ")
+            val words = names.flatMap { extractWords(it) }.distinct()
             val wordSkeletons = words.map { phoneticSkeleton(it) }.filter { it.isNotBlank() }
             var bestScore = 0
             for (q in queries) {
-                val qWords = q.split(Regex("[\\s\\-_.;,/()]+")).filter { it.isNotBlank() }
+                val qWords = extractWords(q)
                 val qSkel = phoneticSkeleton(q)
                 val qWordSkels = qWords.map { phoneticSkeleton(it) }.filter { it.length >= 2 }
 
                 val score = when {
-                    // 5: Exact full name/alias match
-                    names.any { it == q } -> 5
-                    // 4: Exact word match in name/alias
-                    words.any { it == q } -> 4
-                    // 3: Word in name starts with query (e.g., "אלעד" matches "אלעדוש") or exact phonetic word match ("גסיקה" == "jessica")
-                    words.any { it.startsWith(q) && q.length >= 2 } ||
-                        (qSkel.length >= 2 && wordSkeletons.any { it == qSkel }) ||
+                    // 6: Exact full name/alias match
+                    names.any { it == q } -> 6
+                    // 5: Exact word match in name/alias
+                    words.any { it == q } -> 5
+                    // 4: Any word in name starts with query (e.g., "אלעד" in "Eladush אלעדוש") or direct substring in name
+                    words.any { it.startsWith(q) } || fullText.contains(q) ||
+                        (qWords.isNotEmpty() && qWords.all { qw -> words.any { w -> w.contains(qw) } || fullText.contains(qw) }) -> 4
+                    // 3: Exact phonetic word match ("גסיקה" == "jessica", "אלעד" == "elad")
+                    (qSkel.length >= 2 && wordSkeletons.any { it == qSkel }) ||
                         (qWordSkels.isNotEmpty() && qWordSkels.all { qs -> wordSkeletons.any { ws -> ws == qs } }) -> 3
-                    // 2: Phonetic prefix match (e.g., "אלעד" -> "ald" prefix of "eladush" -> "aldS", or "גסי" -> "gsy" prefix of "jessica")
-                    (qSkel.length >= 2 && wordSkeletons.any { it.startsWith(qSkel) }) ||
-                        (qWordSkels.isNotEmpty() && qWordSkels.all { qs -> wordSkeletons.any { ws -> ws.startsWith(qs) } }) -> 2
-                    // 1: Substring match in text or phonetic skeleton
-                    names.any { n -> n.contains(q) || (q.length >= 3 && q.contains(n)) } ||
-                        (qSkel.length >= 3 && wordSkeletons.any { it.contains(qSkel) }) -> 1
+                    // 2: Phonetic prefix/substring match (e.g., "אלעד" -> "ald" prefix of "eladush" -> "alds")
+                    (qSkel.length >= 2 && wordSkeletons.any { it.startsWith(qSkel) || (qSkel.length >= 3 && it.contains(qSkel)) }) ||
+                        (qWordSkels.isNotEmpty() && qWordSkels.all { qs -> wordSkeletons.any { ws -> ws.startsWith(qs) || (qs.length >= 3 && ws.contains(qs)) } }) -> 2
                     else -> 0
                 }
                 if (score > bestScore) bestScore = score
@@ -159,11 +159,7 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         }
 
         if (scored.isEmpty()) return emptyList()
-        // Include all strong matches (score >= 2, or score >= 1 if no stronger match exists) so nicknames like "אלעדוש" are always shown alongside "אלעד"
-        val maxScore = scored.maxOf { it.second }
-        val threshold = if (maxScore >= 2) 2 else 1
         return scored
-            .filter { it.second >= threshold }
             .sortedWith(compareByDescending<Triple<Person, Int, Boolean>> { it.second }.thenByDescending { it.third }.thenBy { it.first.name.lowercase() })
             .map { it.first }
     }

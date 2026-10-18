@@ -398,8 +398,8 @@ enum class SettingsArea(val label: String) {
                         allCallable.map { person ->
                             val cleanName = normalized(person.name)
                             val words = (listOf(cleanName) + person.aliases.split(',', ';').map { normalized(it) })
-                                .flatMap { it.split(Regex("[\\s\\-_.;,/()]+")) }
-                                .filter { it.isNotBlank() }
+                                .flatMap { extractWords(it) }
+                                .distinct()
                             val searchBlob = (words + listOf(cleanName, person.phone)).joinToString(" ")
                             Triple(person, words, searchBlob)
                         }
@@ -412,10 +412,10 @@ enum class SettingsArea(val label: String) {
                         } else if (callFilter.isBlank()) {
                             allCallable
                         } else {
-                            m.matchPeople(listOf(callFilter), allCallable).ifEmpty {
-                                val q = normalized(callFilter)
-                                indexedCallable.filter { (_, _, blob) -> blob.contains(q) }.map { it.first }
-                            }
+                            val q = normalized(callFilter)
+                            val directMatches = indexedCallable.filter { (_, _, blob) -> blob.contains(q) }.map { it.first }
+                            val phoneticMatches = m.matchPeople(listOf(callFilter), allCallable)
+                            (directMatches + phoneticMatches).distinctBy { it.id }
                         }
                     }
 
@@ -477,7 +477,7 @@ enum class SettingsArea(val label: String) {
                     }
                 }
                 Screen.SETTINGS -> {
-                    Heading("הגדרות למשפחה")
+                    Heading("הגדרות למשפחה (גרסה 0.7)")
                     if(settingsArea==null) {
                         Text("בחרו מה להגדיר:")
                         SettingsArea.entries.forEach { area -> Action(area.label,Icons.Default.ChevronLeft,secondary=area!=SettingsArea.FEATURES) { settingsArea=area } }
