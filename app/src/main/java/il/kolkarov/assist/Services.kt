@@ -167,7 +167,7 @@ class DeviceContacts(private val context: Context) {
                 val rawPhone = c.getString(2)?.replace(Regex("[\\s()\\-]"), "").orEmpty()
                 val starred = c.getInt(3) != 0
                 if (name.isBlank() || rawPhone.isBlank()) continue
-                if (name.startsWith("*") || name.startsWith("#")) continue
+                if (rawPhone.startsWith("*") || rawPhone.startsWith("#")) continue
                 val key = "${normalized(name)}|$rawPhone"
                 val existing = byKey[key]
                 if (existing == null || (starred && !existing.favorite)) {

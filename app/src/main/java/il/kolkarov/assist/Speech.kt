@@ -68,59 +68,54 @@ class VoiceInput(
 
     private fun ensureRecognizer(): SpeechRecognizer {
         recognizer?.let { return it }
-        return SpeechRecognizer.createSpeechRecognizer(context.applicationContext).also { rec ->
-            recognizer = rec
-            rec.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {
-                    val s = generation
-                    handler.post { if (s == generation) { onProcessing(false); onListening(true); state("מקשיב… דברו עכשיו") } }
-                }
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {
-                    val s = generation
-                    handler.post { if (s == generation) { onListening(false); onProcessing(true); state("בודק…") } }
-                }
-                override fun onError(error: Int) {
-                    val s = generation
-                    handler.post {
-                        if (s != generation) return@post
-                        onListening(false)
-                        onProcessing(false)
-                        if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
-                            runCatching { rec.cancel() }
-                        }
-                        if (error == SpeechRecognizer.ERROR_CLIENT || error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS || error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == 11 || error == 12 || error == 13) {
-                            fallbackDialog(buildIntent(lastLanguage))
-                            return@post
-                        }
-                        state(when (error) {
-                            SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "זיהוי הדיבור זקוק לחיבור אינטרנט"
-                            SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "לא שמעתי בבירור. לחצו ונסו שוב"
-                            else -> "לא שמעתי בבירור. לחצו ונסו שוב"
-                        })
-                    }
-                }
-                override fun onResults(results: Bundle?) {
-                    val s = generation
-                    val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.filter { it.isNotBlank() }.orEmpty()
-                    handler.post {
-                        if (s != generation) return@post
-                        onListening(false)
-                        if (list.isEmpty()) {
-                            onProcessing(false)
-                            state("לא שמעתי בבירור")
-                        } else {
-                            onProcessing(true)
-                            result(list)
-                        }
-                    }
-                }
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
+        return SpeechRecognizer.createSpeechRecognizer(context.applicationContext).also { recognizer = it }
+    }
+
+    private fun listenerForSession(session: Int, rec: SpeechRecognizer) = object : RecognitionListener {
+        override fun onReadyForSpeech(params: Bundle?) {
+            handler.post { if (session == generation) { onProcessing(false); onListening(true); state("מקשיב… דברו עכשיו") } }
         }
+        override fun onBeginningOfSpeech() {}
+        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onBufferReceived(buffer: ByteArray?) {}
+        override fun onEndOfSpeech() {
+            handler.post { if (session == generation) { onListening(false); onProcessing(true); state("בודק…") } }
+        }
+        override fun onError(error: Int) {
+            handler.post {
+                if (session != generation) return@post
+                onListening(false)
+                onProcessing(false)
+                if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                    runCatching { rec.cancel() }
+                }
+                if (error == SpeechRecognizer.ERROR_CLIENT || error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS || error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == 11 || error == 12 || error == 13) {
+                    fallbackDialog(buildIntent(lastLanguage))
+                    return@post
+                }
+                state(when (error) {
+                    SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "זיהוי הדיבור זקוק לחיבור אינטרנט"
+                    SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "לא שמעתי בבירור. לחצו ונסו שוב"
+                    else -> "לא שמעתי בבירור. לחצו ונסו שוב"
+                })
+            }
+        }
+        override fun onResults(results: Bundle?) {
+            val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.filter { it.isNotBlank() }.orEmpty()
+            handler.post {
+                if (session != generation) return@post
+                onListening(false)
+                if (list.isEmpty()) {
+                    onProcessing(false)
+                    state("לא שמעתי בבירור")
+                } else {
+                    onProcessing(true)
+                    result(list)
+                }
+            }
+        }
+        override fun onPartialResults(partialResults: Bundle?) {}
+        override fun onEvent(eventType: Int, params: Bundle?) {}
     }
 
     private var lastLanguage: String = "he-IL"
@@ -150,11 +145,14 @@ class VoiceInput(
             runCatching {
                 val rec = ensureRecognizer()
                 rec.cancel()
+                rec.setRecognitionListener(listenerForSession(session, rec))
                 rec.startListening(speechIntent)
             }.onFailure {
-                onListening(false)
-                onProcessing(false)
-                fallbackDialog(speechIntent)
+                if (session == generation) {
+                    onListening(false)
+                    onProcessing(false)
+                    fallbackDialog(speechIntent)
+                }
             }
         }
     }

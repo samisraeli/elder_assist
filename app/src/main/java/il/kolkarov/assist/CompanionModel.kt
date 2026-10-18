@@ -43,6 +43,8 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
     var places by mutableStateOf<List<Place>>(emptyList())
     var calendarChoices by mutableStateOf<List<CalendarChoice>>(emptyList())
     private var task: Job? = null
+    private var searchJob: Job? = null
+    private var profileSaveJob: Job? = null
     var output: SpeechOutput? = null
     var dial: (Person) -> Unit = {}
     private var lastWeather: Weather? = null
@@ -96,8 +98,8 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         is org.json.JSONException -> "השירות או הקובץ החזירו מידע שאינו תקין"
         else -> e.message?.takeIf { it.any { c -> c in 'א'..'ת' } } ?: "הפעולה לא הצליחה. בדקו את החיבור ואת הקובץ ונסו שוב"
     }
-    fun stop() { task?.cancel(); listening = false; processingVoice = false; output?.stop(); status = "מוכן להקשיב" }
-    fun quietStop() { task?.cancel(); listening = false; processingVoice = false; output?.stop(); status = "מוכן להקשיב" }
+    fun stop() { task?.cancel(); searchJob?.cancel(); listening = false; processingVoice = false; output?.stop(); status = "מוכן להקשיב" }
+    fun quietStop() { task?.cancel(); searchJob?.cancel(); listening = false; processingVoice = false; output?.stop(); status = "מוכן להקשיב" }
     fun ask(text: String, action: suspend () -> Unit) { confirmation = Confirmation(text,action); respond(text) }
     fun confirm() {
         val pending = confirmation ?: return
@@ -105,9 +107,9 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         confirmation = null; output?.stop()
         runTask { pending.action() }
     }
-    fun cancel() { confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; listening = false; processingVoice = false; output?.stop(); status = "מוכן להקשיב" }
+    fun cancel() { task?.cancel(); searchJob?.cancel(); confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; listening = false; processingVoice = false; output?.stop(); status = "מוכן להקשיב" }
     fun navigate(to: Screen) {
-        confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; listening = false; processingVoice = false; output?.stop()
+        searchJob?.cancel(); confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; listening = false; processingVoice = false; output?.stop()
         answer = ""; spokenAnswer = false; status = "מוכן להקשיב"
         screen = to
         if (to == Screen.AGENDA) loadAgenda()
@@ -223,7 +225,8 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
             findCallFromCandidates(texts)
             return
         }
-        viewModelScope.launch {
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
             val matched = withContext(Dispatchers.Default) { matchPeople(texts) }
             if (matched.isNotEmpty()) {
                 findCallFromCandidates(texts, matched)
@@ -267,7 +270,8 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
                 else requestDeleteReminder(matches.single())
             }
             is Command.Clarify -> {
-                viewModelScope.launch {
+                searchJob?.cancel()
+                searchJob = viewModelScope.launch {
                     val matched = withContext(Dispatchers.Default) { matchPeople(listOf(text)) }
                     if (matched.isNotEmpty()) findCallFromCandidates(listOf(text), matched)
                     else { processingVoice = false; respond(command.message) }
@@ -288,7 +292,8 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         }
         processingVoice = true
         status = "מחפש את $displayQuery..."
-        viewModelScope.launch {
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
             val matches = precomputedMatches ?: withContext(Dispatchers.Default) { matchPeople(texts) }
             voiceSearchQuery = displayQuery
             callChoices = matches
@@ -342,7 +347,18 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         val list = runCatching { calendar.choices() }.getOrDefault(emptyList())
         withContext(Dispatchers.Main) { calendarChoices = list }
     } }
-    fun saveProfile(p: Profile) { runTask { app.profiles.save(p); NoticeScheduler(app).refresh(); status = "ההגדרות נשמרו" } }
+    fun saveProfile(p: Profile) {
+        profileSaveJob?.cancel()
+        profileSaveJob = viewModelScope.launch {
+            runCatching {
+                app.profiles.save(p)
+                NoticeScheduler(app).refresh()
+                status = "ההגדרות נשמרו"
+            }.onFailure {
+                status = "לא ניתן לשמור הגדרות כרגע"
+            }
+        }
+    }
     fun searchPlaces(query: String) { runTask { places = weather.places(query); if(places.isEmpty()) status = "לא נמצאו ערים. נסו איות אחר" } }
     fun getWeather() { runTask {
         try { lastWeather = weather.current(profile.value); respond(lastWeather!!.text + " הנתונים מאת Open-Meteo.") }

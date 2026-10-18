@@ -21,10 +21,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var speech: DeviceSpeech
     private lateinit var input: VoiceInput
     private var pendingCall: Person? = null
+    private var awaitingSpeechDialog = false
     private val microphone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if(granted) input.listen(model.profile.value.language) else model.status = "המיקרופון לא אושר. אפשר להשתמש בכפתורים או לאשר בהגדרות המכשיר"
     }
     private val speechDialog = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        awaitingSpeechDialog = false
         model.listening = false
         val list = res.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.filter { it.isNotBlank() }.orEmpty()
         if (list.isNotEmpty()) {
@@ -85,7 +87,9 @@ class MainActivity : ComponentActivity() {
             onListening = { model.listening = it },
             onProcessing = { model.processingVoice = it },
             fallbackDialog = { intent ->
+                awaitingSpeechDialog = true
                 runCatching { speechDialog.launch(intent) }.onFailure {
+                    awaitingSpeechDialog = false
                     model.listening = false
                     model.processingVoice = false
                     model.status = "אין שירות זיהוי דיבור במכשיר"
@@ -140,7 +144,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         if(::input.isInitialized) input.cancel()
         model.quietStop(); model.output = null
-        model.confirmation = null
+        if (!awaitingSpeechDialog) model.confirmation = null
     }
     override fun onDestroy() {
         input.close(); speech.close(); model.output = null; model.dial = {}; super.onDestroy()

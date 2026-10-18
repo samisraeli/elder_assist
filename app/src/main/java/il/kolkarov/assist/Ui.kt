@@ -93,7 +93,7 @@ enum class SettingsArea(val label: String) {
     val body: @Composable RowScope.() -> Unit = {
         Icon(icon,null,Modifier.size(24.dp))
         Spacer(Modifier.width(8.dp))
-        Text(text,style=MaterialTheme.typography.labelLarge,maxLines=1)
+        Text(text,style=MaterialTheme.typography.labelLarge,maxLines=2)
     }
     if (primary) {
         Button(onClick,modifier.heightIn(min=56.dp),enabled=enabled,shape=RoundedCornerShape(16.dp),contentPadding=PaddingValues(horizontal=12.dp,vertical=10.dp),content=body)
@@ -140,6 +140,7 @@ enum class SettingsArea(val label: String) {
     var searchFocused by remember { mutableStateOf(false) }
     var selectedLetter by remember { mutableStateOf<String?>(null) }
     var englishMode by remember { mutableStateOf(false) }
+    var contactLimit by remember { mutableStateOf(50) }
     var showReminder by remember { mutableStateOf(false) }; var showPaste by remember { mutableStateOf(false) }
     var showSource by remember { mutableStateOf(false) }; var familyGate by remember { mutableStateOf(false) }
     var settingsArea by remember { mutableStateOf<SettingsArea?>(null) }
@@ -148,6 +149,9 @@ enum class SettingsArea(val label: String) {
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    LaunchedEffect(debouncedQuery, selectedLetter, m.callChoices) {
+        contactLimit = 50
+    }
     LaunchedEffect(m.voiceSearchQuery) {
         if (m.voiceSearchQuery.isNotBlank()) {
             callFilter = m.voiceSearchQuery
@@ -335,9 +339,12 @@ enum class SettingsArea(val label: String) {
                             Text("טרם הוגדרו אתרי חדשות. אפשר להוסיף בהגדרות המשפחה ← אתרי חדשות וספורט.")
                         }
                     } else {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            activeTopics.forEach { t ->
-                                HomeTile(t.label, Icons.Default.Newspaper, primary = m.topic == t, enabled = !m.busy, modifier = Modifier.weight(1f)) { m.loadNews(t) }
+                        activeTopics.chunked(2).forEach { rowTopics ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                rowTopics.forEach { t ->
+                                    HomeTile(t.label, Icons.Default.Newspaper, primary = m.topic == t, enabled = !m.busy, modifier = Modifier.weight(1f)) { m.loadNews(t) }
+                                }
+                                if (rowTopics.size == 1) Spacer(Modifier.weight(1f))
                             }
                         }
                         if(m.newsResult == null && !m.busy) Text("בחרו תחום כדי לטעון חדשות.")
@@ -521,7 +528,7 @@ enum class SettingsArea(val label: String) {
                         Text("לא נמצא איש קשר תואם.")
                     } else {
                         Panel {
-                            filtered.take(50).forEachIndexed { idx, person ->
+                            filtered.take(contactLimit).forEachIndexed { idx, person ->
                                 if (idx > 0) HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
                                 Row(
                                     modifier = Modifier
@@ -557,6 +564,15 @@ enum class SettingsArea(val label: String) {
                                     )
                                 }
                             }
+                            if (filtered.size > contactLimit) {
+                                val remaining = filtered.size - contactLimit
+                                Action(
+                                    text = "הצגת עוד אנשי קשר ($remaining נוספים)",
+                                    icon = Icons.Default.ExpandMore,
+                                    secondary = true,
+                                    onClick = { contactLimit += 50 }
+                                )
+                            }
                         }
                     }
                 }
@@ -573,7 +589,7 @@ enum class SettingsArea(val label: String) {
                     }
                 }
                 Screen.SETTINGS -> {
-                    Heading("הגדרות למשפחה (גרסה 1.0)")
+                    Heading("הגדרות למשפחה (גרסה 1.1)")
                     if(settingsArea==null) {
                         Text("בחרו מה להגדיר:")
                         SettingsArea.entries.forEach { area -> Action(area.label,Icons.Default.ChevronLeft,secondary=area!=SettingsArea.FEATURES) { settingsArea=area } }
