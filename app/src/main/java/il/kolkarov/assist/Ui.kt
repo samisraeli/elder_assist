@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
@@ -135,6 +136,8 @@ enum class SettingsArea(val label: String) {
     var personOnlyBirthday by remember { mutableStateOf(false) }
     var peopleTab by remember { mutableStateOf(0) }
     var callFilter by remember { mutableStateOf("") }
+    var debouncedQuery by remember { mutableStateOf("") }
+    var searchFocused by remember { mutableStateOf(false) }
     var selectedLetter by remember { mutableStateOf<String?>(null) }
     var englishMode by remember { mutableStateOf(false) }
     var showReminder by remember { mutableStateOf(false) }; var showPaste by remember { mutableStateOf(false) }
@@ -144,6 +147,21 @@ enum class SettingsArea(val label: String) {
     val pageScroll = rememberScrollState()
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    LaunchedEffect(callFilter) {
+        if (callFilter.isBlank()) {
+            debouncedQuery = ""
+        } else {
+            delay(800)
+            debouncedQuery = callFilter
+        }
+    }
+    LaunchedEffect(pageScroll.isScrollInProgress) {
+        if (pageScroll.isScrollInProgress && (imeVisible || searchFocused)) {
+            keyboard?.hide()
+            focusManager.clearFocus()
+        }
+    }
     var nowTime by remember { mutableStateOf(ZonedDateTime.now(ZoneId.of(p.zone))) }
     LaunchedEffect(p.zone) {
         while(true) {
@@ -321,26 +339,41 @@ enum class SettingsArea(val label: String) {
                     OutlinedTextField(
                         value = callFilter,
                         onValueChange = { callFilter = it; selectedLetter = null; m.callChoices = emptyList(); m.answer = "" },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().onFocusChanged { searchFocused = it.isFocused },
                         label = { Text("חיפוש לפי שם") },
                         singleLine = true,
                         textStyle = MaterialTheme.typography.bodyLarge,
                         shape = RoundedCornerShape(14.dp),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide(); focusManager.clearFocus() }),
+                        keyboardActions = KeyboardActions(onSearch = { debouncedQuery = callFilter; keyboard?.hide(); focusManager.clearFocus() }),
                         trailingIcon = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (callFilter.isNotEmpty() || selectedLetter != null || m.callChoices.isNotEmpty()) {
-                                    IconButton({ callFilter = ""; selectedLetter = null; m.callChoices = emptyList(); m.answer = "" }) {
+                                    IconButton({ callFilter = ""; debouncedQuery = ""; selectedLetter = null; m.callChoices = emptyList(); m.answer = "" }) {
                                         Icon(Icons.Default.Clear, contentDescription = "נקה חיפוש")
                                     }
                                 }
-                                IconButton({ keyboard?.hide(); focusManager.clearFocus() }) {
+                                IconButton({ debouncedQuery = callFilter; keyboard?.hide(); focusManager.clearFocus() }) {
                                     Icon(Icons.Default.KeyboardHide, contentDescription = "סגירת מקלדת")
                                 }
                             }
                         }
                     )
+
+                    // Big, unambiguous button to close the keyboard for elderly users
+                    if (imeVisible || searchFocused) {
+                        Action(
+                            text = "סיום הקלדה / סגירת מקלדת",
+                            icon = Icons.Default.KeyboardHide,
+                            secondary = true,
+                            onClick = {
+                                debouncedQuery = callFilter
+                                keyboard?.hide()
+                                focusManager.clearFocus()
+                                searchFocused = false
+                            }
+                        )
+                    }
 
                     // Alphabet Quick Filter Bar (א-ב / A-Z)
                     Row(
@@ -350,7 +383,7 @@ enum class SettingsArea(val label: String) {
                     ) {
                         FilterChip(
                             selected = selectedLetter == null && callFilter.isBlank() && m.callChoices.isEmpty(),
-                            onClick = { selectedLetter = null; callFilter = ""; m.callChoices = emptyList(); m.answer = ""; keyboard?.hide(); focusManager.clearFocus() },
+                            onClick = { selectedLetter = null; callFilter = ""; debouncedQuery = ""; m.callChoices = emptyList(); m.answer = ""; keyboard?.hide(); focusManager.clearFocus() },
                             label = { Text("הכל", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold) }
                         )
                         FilterChip(
@@ -365,6 +398,7 @@ enum class SettingsArea(val label: String) {
                                 onClick = {
                                     selectedLetter = if (selectedLetter == letter) null else letter
                                     callFilter = ""
+                                    debouncedQuery = ""
                                     m.callChoices = emptyList()
                                     m.answer = ""
                                     keyboard?.hide()
@@ -383,6 +417,7 @@ enum class SettingsArea(val label: String) {
                             secondary = true,
                             onClick = {
                                 callFilter = ""
+                                debouncedQuery = ""
                                 selectedLetter = null
                                 m.callChoices = emptyList()
                                 m.answer = ""
@@ -404,17 +439,17 @@ enum class SettingsArea(val label: String) {
                             Triple(person, words, searchBlob)
                         }
                     }
-                    val filtered = remember(indexedCallable, callFilter, selectedLetter, m.callChoices) {
+                    val filtered = remember(indexedCallable, debouncedQuery, selectedLetter, m.callChoices) {
                         if (m.callChoices.isNotEmpty()) m.callChoices
                         else if (selectedLetter != null) {
                             val l = selectedLetter!!.lowercase()
                             indexedCallable.filter { (_, words, _) -> words.any { it.startsWith(l) } }.map { it.first }
-                        } else if (callFilter.isBlank()) {
+                        } else if (debouncedQuery.isBlank()) {
                             allCallable
                         } else {
-                            val q = normalized(callFilter)
+                            val q = normalized(debouncedQuery)
                             val directMatches = indexedCallable.filter { (_, _, blob) -> blob.contains(q) }.map { it.first }
-                            val phoneticMatches = m.matchPeople(listOf(callFilter), allCallable)
+                            val phoneticMatches = m.matchPeople(listOf(debouncedQuery), allCallable)
                             (directMatches + phoneticMatches).distinctBy { it.id }
                         }
                     }
@@ -477,7 +512,7 @@ enum class SettingsArea(val label: String) {
                     }
                 }
                 Screen.SETTINGS -> {
-                    Heading("הגדרות למשפחה (גרסה 0.7)")
+                    Heading("הגדרות למשפחה (גרסה 0.8)")
                     if(settingsArea==null) {
                         Text("בחרו מה להגדיר:")
                         SettingsArea.entries.forEach { area -> Action(area.label,Icons.Default.ChevronLeft,secondary=area!=SettingsArea.FEATURES) { settingsArea=area } }
