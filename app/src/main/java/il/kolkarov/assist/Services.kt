@@ -156,24 +156,26 @@ class DeviceContacts(private val context: Context) {
         val projection = arrayOf(
             android.provider.ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
             android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-            android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER
+            android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER,
+            android.provider.ContactsContract.CommonDataKinds.Phone.STARRED
         )
-        val seen = mutableSetOf<String>()
-        return context.contentResolver.query(uri, projection, null, null, android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC")?.use { c ->
-            buildList {
-                while (c.moveToNext()) {
-                    val id = c.getString(0) ?: continue
-                    val name = c.getString(1)?.trim().orEmpty()
-                    val rawPhone = c.getString(2)?.replace(Regex("[\\s()\\-]"), "").orEmpty()
-                    if (name.isBlank() || rawPhone.isBlank()) continue
-                    if (name.startsWith("*") || name.startsWith("#")) continue
-                    val key = "${normalized(name)}|$rawPhone"
-                    if (seen.add(key)) {
-                        add(Person(id = "device:$id:$rawPhone", name = name, phone = rawPhone))
-                    }
+        val byKey = linkedMapOf<String, Person>()
+        context.contentResolver.query(uri, projection, null, null, android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC")?.use { c ->
+            while (c.moveToNext()) {
+                val id = c.getString(0) ?: continue
+                val name = c.getString(1)?.trim().orEmpty()
+                val rawPhone = c.getString(2)?.replace(Regex("[\\s()\\-]"), "").orEmpty()
+                val starred = c.getInt(3) != 0
+                if (name.isBlank() || rawPhone.isBlank()) continue
+                if (name.startsWith("*") || name.startsWith("#")) continue
+                val key = "${normalized(name)}|$rawPhone"
+                val existing = byKey[key]
+                if (existing == null || (starred && !existing.favorite)) {
+                    byKey[key] = Person(id = "device:$id:$rawPhone", name = name, phone = rawPhone, favorite = starred)
                 }
             }
-        } ?: emptyList()
+        }
+        return byKey.values.sortedWith(compareByDescending<Person> { it.favorite }.thenBy { it.name.lowercase() })
     }
 }
 

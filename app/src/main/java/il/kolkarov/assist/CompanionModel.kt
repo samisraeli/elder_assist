@@ -56,10 +56,14 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
 
     fun allCallablePeople(): List<Person> {
         val localWithPhone = people.value.filter { it.phone.isNotBlank() }
-        if (!profile.value.enablePhoneContacts) return localWithPhone
-        val seen = localWithPhone.map { "${normalized(it.name)}|${it.phone}" }.toMutableSet()
-        val extra = phonePeople.filter { it.phone.isNotBlank() && seen.add("${normalized(it.name)}|${it.phone}") }
-        return (localWithPhone + extra).sortedBy { it.name }
+        val combined = if (!profile.value.enablePhoneContacts) {
+            localWithPhone
+        } else {
+            val seen = localWithPhone.map { "${normalized(it.name)}|${it.phone}" }.toMutableSet()
+            val extra = phonePeople.filter { it.phone.isNotBlank() && seen.add("${normalized(it.name)}|${it.phone}") }
+            localWithPhone + extra
+        }
+        return combined.sortedWith(compareByDescending<Person> { it.favorite }.thenBy { it.name.lowercase() })
     }
 
     fun loadPhoneContacts() {
@@ -116,19 +120,35 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         }.filter { it.isNotBlank() }.distinct()
         if (queries.isEmpty()) return emptyList()
 
-        val exact = candidates.filter { p ->
+        // Score each candidate:
+        // 4 = exact full name or alias match
+        // 3 = exact word match inside name/alias
+        // 2 = word in name/alias starts with query (e.g. "אלעד" matches "Eladush אלעדוש")
+        // 1 = substring match anywhere in name/alias
+        val scored = candidates.mapNotNull { p ->
             val names = (listOf(p.name) + p.aliases.split(',', ';')).map { normalized(it) }.filter { it.isNotBlank() }
-            queries.any { q -> names.any { n -> n == q || n.split(' ').contains(q) } }
-        }
-        if (exact.isNotEmpty()) return exact
-
-        return candidates.filter { p ->
-            val names = (listOf(p.name) + p.aliases.split(',', ';')).map { normalized(it) }.filter { it.isNotBlank() }
-            queries.any { q ->
-                val qTokens = q.split(' ').filter { it.length >= 2 }
-                names.any { n -> n.contains(q) || q.contains(n) || (qTokens.isNotEmpty() && qTokens.all { t -> n.contains(t) || (t.length >= 3 && n.contains(t.drop(1))) }) }
+            val words = names.flatMap { it.split(Regex("[\\s\\-_.;,/]+")) }.filter { it.isNotBlank() }
+            var bestScore = 0
+            for (q in queries) {
+                val qWords = q.split(' ').filter { it.isNotBlank() }
+                val score = when {
+                    names.any { it == q } -> 4
+                    words.any { it == q } -> 3
+                    words.any { it.startsWith(q) || (q.length >= 3 && it.startsWith(q.drop(1))) } -> 2
+                    names.any { n -> n.contains(q) || q.contains(n) || (qWords.isNotEmpty() && qWords.all { qw -> n.contains(qw) || (qw.length >= 3 && n.contains(qw.drop(1))) }) } -> 1
+                    else -> 0
+                }
+                if (score > bestScore) bestScore = score
             }
+            if (bestScore > 0) Triple(p, bestScore, p.favorite) else null
         }
+
+        val maxScore = scored.maxOfOrNull { it.second } ?: return emptyList()
+        // If there is a exact match (score 4), prefer score >= 2 so nicknames like "אלעדוש" are also included if relevant, or return sorted by score & favorite
+        return scored
+            .filter { if (maxScore == 4) it.second >= 3 else it.second >= 1 }
+            .sortedWith(compareByDescending<Triple<Person, Int, Boolean>> { it.second }.thenByDescending { it.third }.thenBy { it.first.name.lowercase() })
+            .map { it.first }
     }
 
     fun commandCandidates(texts: List<String>) {

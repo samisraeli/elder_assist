@@ -320,7 +320,7 @@ enum class SettingsArea(val label: String) {
                     // Search Field with Clear and Hide Keyboard buttons
                     OutlinedTextField(
                         value = callFilter,
-                        onValueChange = { callFilter = it; selectedLetter = null; m.callChoices = emptyList() },
+                        onValueChange = { callFilter = it; selectedLetter = null; m.callChoices = emptyList(); m.answer = "" },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("חיפוש לפי שם") },
                         singleLine = true,
@@ -330,8 +330,8 @@ enum class SettingsArea(val label: String) {
                         keyboardActions = KeyboardActions(onSearch = { keyboard?.hide(); focusManager.clearFocus() }),
                         trailingIcon = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (callFilter.isNotEmpty() || selectedLetter != null) {
-                                    IconButton({ callFilter = ""; selectedLetter = null; m.callChoices = emptyList() }) {
+                                if (callFilter.isNotEmpty() || selectedLetter != null || m.callChoices.isNotEmpty()) {
+                                    IconButton({ callFilter = ""; selectedLetter = null; m.callChoices = emptyList(); m.answer = "" }) {
                                         Icon(Icons.Default.Clear, contentDescription = "נקה חיפוש")
                                     }
                                 }
@@ -349,8 +349,8 @@ enum class SettingsArea(val label: String) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         FilterChip(
-                            selected = selectedLetter == null && callFilter.isBlank(),
-                            onClick = { selectedLetter = null; callFilter = ""; m.callChoices = emptyList(); keyboard?.hide(); focusManager.clearFocus() },
+                            selected = selectedLetter == null && callFilter.isBlank() && m.callChoices.isEmpty(),
+                            onClick = { selectedLetter = null; callFilter = ""; m.callChoices = emptyList(); m.answer = ""; keyboard?.hide(); focusManager.clearFocus() },
                             label = { Text("הכל", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold) }
                         )
                         FilterChip(
@@ -366,6 +366,7 @@ enum class SettingsArea(val label: String) {
                                     selectedLetter = if (selectedLetter == letter) null else letter
                                     callFilter = ""
                                     m.callChoices = emptyList()
+                                    m.answer = ""
                                     keyboard?.hide()
                                     focusManager.clearFocus()
                                 },
@@ -374,25 +375,47 @@ enum class SettingsArea(val label: String) {
                         }
                     }
 
+                    // Prominent Clear Search button whenever any filter or voice result is active
+                    if (callFilter.isNotBlank() || selectedLetter != null || m.callChoices.isNotEmpty()) {
+                        Action(
+                            text = "ניקוי חיפוש והצגת כל אנשי הקשר",
+                            icon = Icons.Default.Clear,
+                            secondary = true,
+                            onClick = {
+                                callFilter = ""
+                                selectedLetter = null
+                                m.callChoices = emptyList()
+                                m.answer = ""
+                                keyboard?.hide()
+                                focusManager.clearFocus()
+                            }
+                        )
+                    }
+
                     // Precomputed fast contact list
                     val allCallable = remember(people, m.phonePeople, p.enablePhoneContacts) { m.allCallablePeople() }
                     val indexedCallable = remember(allCallable) {
                         allCallable.map { person ->
                             val cleanName = normalized(person.name)
-                            val searchBlob = (listOf(cleanName) + person.aliases.split(',', ';').map { normalized(it) } + person.phone).joinToString(" ")
-                            Triple(person, cleanName, searchBlob)
+                            val words = (listOf(cleanName) + person.aliases.split(',', ';').map { normalized(it) })
+                                .flatMap { it.split(Regex("[\\s\\-_.;,/()]+")) }
+                                .filter { it.isNotBlank() }
+                            val searchBlob = (words + listOf(cleanName, person.phone)).joinToString(" ")
+                            Triple(person, words, searchBlob)
                         }
                     }
                     val filtered = remember(indexedCallable, callFilter, selectedLetter, m.callChoices) {
                         if (m.callChoices.isNotEmpty()) m.callChoices
                         else if (selectedLetter != null) {
                             val l = selectedLetter!!.lowercase()
-                            indexedCallable.filter { (_, cleanName, _) -> cleanName.startsWith(l) }.map { it.first }
+                            indexedCallable.filter { (_, words, _) -> words.any { it.startsWith(l) } }.map { it.first }
                         } else if (callFilter.isBlank()) {
                             allCallable
                         } else {
-                            val q = normalized(callFilter)
-                            indexedCallable.filter { (_, _, blob) -> blob.contains(q) }.map { it.first }
+                            m.matchPeople(listOf(callFilter), allCallable).ifEmpty {
+                                val q = normalized(callFilter)
+                                indexedCallable.filter { (_, _, blob) -> blob.contains(q) }.map { it.first }
+                            }
                         }
                     }
 
@@ -402,7 +425,7 @@ enum class SettingsArea(val label: String) {
                         Text("לא נמצא איש קשר תואם.")
                     } else {
                         Panel {
-                            filtered.take(40).forEachIndexed { idx, person ->
+                            filtered.take(50).forEachIndexed { idx, person ->
                                 if (idx > 0) HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
                                 Row(
                                     modifier = Modifier
@@ -417,7 +440,17 @@ enum class SettingsArea(val label: String) {
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Column(Modifier.weight(1f)) {
-                                        Text(person.name, style = MaterialTheme.typography.titleLarge)
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            if (person.favorite) {
+                                                Icon(
+                                                    Icons.Default.Star,
+                                                    contentDescription = "מועדף",
+                                                    tint = Color(0xFFE6A800),
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                            }
+                                            Text(person.name, style = MaterialTheme.typography.titleLarge)
+                                        }
                                         Text(person.phone, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f))
                                     }
                                     Icon(
