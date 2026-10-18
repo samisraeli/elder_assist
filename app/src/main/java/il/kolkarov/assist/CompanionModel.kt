@@ -32,6 +32,7 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
     var busy by mutableStateOf(false)
     var confirmation by mutableStateOf<Confirmation?>(null)
     var callChoices by mutableStateOf<List<Person>>(emptyList())
+    var voiceSearchQuery by mutableStateOf("")
     var phonePeople by mutableStateOf<List<Person>>(emptyList())
     var agenda by mutableStateOf<List<AgendaItem>>(emptyList())
     var newsResult by mutableStateOf<NewsResult?>(null)
@@ -103,28 +104,39 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         confirmation = null; output?.stop()
         runTask { pending.action() }
     }
-    fun cancel() { confirmation = null; callChoices = emptyList(); listening = false; output?.stop(); status = "מוכן להקשיב" }
+    fun cancel() { confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; listening = false; output?.stop(); status = "מוכן להקשיב" }
     fun navigate(to: Screen) {
-        confirmation = null; callChoices = emptyList(); listening = false; output?.stop()
+        confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; listening = false; output?.stop()
         answer = ""; spokenAnswer = false; status = "מוכן להקשיב"
         screen = to
         if (to == Screen.AGENDA) loadAgenda()
-        if (to == Screen.CALLS) loadPhoneContacts()
-        if (to == Screen.SETTINGS) { loadCalendars(); loadPhoneContacts() }
+        if (to == Screen.CALLS && phonePeople.isEmpty()) loadPhoneContacts()
+        if (to == Screen.SETTINGS) { loadCalendars(); if (phonePeople.isEmpty()) loadPhoneContacts() }
     }
+
+    private val callVerbRegex = Regex("^(התקשר|תתקשר|התקשרי|תתקשרי|להתקשר|חייג|תחייג|חייגי|תחייגי|לחייג|שיחה|לדבר|טלפן|תטלפן)( עם| אל)?( ל)? ?")
 
     fun matchPeople(rawQueries: List<String>, candidates: List<Person> = allCallablePeople()): List<Person> {
         val baseQueries = rawQueries.map {
-            normalized(it).replaceFirst(Regex("^(התקשר|תתקשר|התקשרי|תתקשרי|להתקשר|חייג|תחייג|חייגי|תחייגי|לחייג|שיחה|לדבר)( עם| אל)?( ל)? ?"), "")
-                .replace(Regex("^(עם |אל )"), "").trim()
+            normalized(it).replaceFirst(callVerbRegex, "")
+                .replace(Regex("^(עם |אל |ל )"), "").trim()
         }.filter { it.isNotBlank() }
 
-        // Expand queries to also include versions without leading 'ל' (e.g., "לאלעד" -> "אלעד", "לליאור" -> "ליאור")
+        // Expand queries to handle Hebrew 'ל' prefix ("לאלעד" -> "אלעד", and if speech dropped 'א'/'ע' after 'ל': "לעד" -> "אלעד"/"עלעד")
         val queries = baseQueries.flatMap { q ->
-            val withoutLamed = if (q.startsWith("ל") && q.length >= 3) q.drop(1).trim() else null
-            listOfNotNull(q, withoutLamed)
-        }.distinct()
+            val withoutLamed = if (q.startsWith("ל") && q.length >= 2) q.drop(1).trim() else null
+            val withAlef = if (withoutLamed != null && !withoutLamed.startsWith("א")) "א$withoutLamed" else null
+            val withAyin = if (withoutLamed != null && !withoutLamed.startsWith("ע")) "ע$withoutLamed" else null
+            listOfNotNull(q, withoutLamed, withAlef, withAyin)
+        }.filter { it.isNotBlank() }.distinct()
         if (queries.isEmpty()) return emptyList()
+
+        val preparedQueries = queries.map { q ->
+            val qWords = extractWords(q)
+            val qSkel = phoneticSkeleton(q)
+            val qWordSkels = qWords.map { phoneticSkeleton(it) }.filter { it.length >= 2 }
+            Triple(q, qWords, qSkel to qWordSkels)
+        }
 
         val scored = candidates.mapNotNull { p ->
             val names = (listOf(p.name) + p.aliases.split(',', ';')).map { normalized(it) }.filter { it.isNotBlank() }
@@ -132,11 +144,8 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
             val words = names.flatMap { extractWords(it) }.distinct()
             val wordSkeletons = words.map { phoneticSkeleton(it) }.filter { it.isNotBlank() }
             var bestScore = 0
-            for (q in queries) {
-                val qWords = extractWords(q)
-                val qSkel = phoneticSkeleton(q)
-                val qWordSkels = qWords.map { phoneticSkeleton(it) }.filter { it.length >= 2 }
-
+            for ((q, qWords, skels) in preparedQueries) {
+                val (qSkel, qWordSkels) = skels
                 val score = when {
                     // 6: Exact full name/alias match
                     names.any { it == q } -> 6
@@ -159,8 +168,13 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         }
 
         if (scored.isEmpty()) return emptyList()
+        // Favorites ALWAYS come first among matching contacts, then sorted by match score and name!
         return scored
-            .sortedWith(compareByDescending<Triple<Person, Int, Boolean>> { it.second }.thenByDescending { it.third }.thenBy { it.first.name.lowercase() })
+            .sortedWith(
+                compareByDescending<Triple<Person, Int, Boolean>> { it.third }
+                    .thenByDescending { it.second }
+                    .thenBy { it.first.name.lowercase() }
+            )
             .map { it.first }
     }
 
@@ -183,7 +197,7 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // First check if any recognized candidate is a Call command or matches a contact on CALLS/HOME screen
+        // First check if any recognized candidate is a Call command
         val parsedList = texts.map { it to CommandParser.parse(it, now) }
         val callCmd = parsedList.firstNotNullOfOrNull { (_, cmd) -> (cmd as? Command.Call)?.name }
         if (callCmd != null) {
@@ -197,12 +211,18 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // If all parsed as Clarify (e.g., user just said a person's name on HOME or CALLS)
-        val matched = matchPeople(texts)
-        if (matched.isNotEmpty() || screen == Screen.CALLS) {
+        // If on CALLS screen or user just spoke a contact's name (e.g., "אלעד", "ג'סיקה")
+        if (screen == Screen.CALLS) {
             findCallFromCandidates(texts)
-        } else {
-            command(first)
+            return
+        }
+        viewModelScope.launch {
+            val matched = withContext(Dispatchers.Default) { matchPeople(texts) }
+            if (matched.isNotEmpty()) {
+                findCallFromCandidates(texts, matched)
+            } else {
+                command(first)
+            }
         }
     }
 
@@ -237,22 +257,42 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
                 else requestDeleteReminder(matches.single())
             }
             is Command.Clarify -> {
-                val matched = matchPeople(listOf(text))
-                if (matched.isNotEmpty()) findCallFromCandidates(listOf(text)) else respond(command.message)
+                viewModelScope.launch {
+                    val matched = withContext(Dispatchers.Default) { matchPeople(listOf(text)) }
+                    if (matched.isNotEmpty()) findCallFromCandidates(listOf(text), matched) else respond(command.message)
+                }
             }
         }
     }
 
-    fun findCallFromCandidates(texts: List<String>) {
+    fun findCallFromCandidates(texts: List<String>, precomputedMatches: List<Person>? = null) {
+        val rawCleaned = normalized(texts.firstOrNull().orEmpty())
+            .replaceFirst(callVerbRegex, "")
+            .replace(Regex("^(עם |אל |ל )"), "").trim()
+            .ifBlank { texts.firstOrNull().orEmpty().trim() }
+        val displayQuery = if (rawCleaned.startsWith("ל") && rawCleaned.length >= 3 && texts.firstOrNull()?.contains(Regex("התקשר|תתקשר|חייג|תחייג|שיחה|לדבר|טלפן")) == true) {
+            rawCleaned.drop(1).trim()
+        } else {
+            rawCleaned
+        }
+        voiceSearchQuery = displayQuery
         screen = Screen.CALLS
-        val matches = matchPeople(texts)
-        val displayQuery = normalized(texts.firstOrNull().orEmpty())
-            .replaceFirst(Regex("^(התקשר|תתקשר|התקשרי|תתקשרי|להתקשר|חייג|תחייג|חייגי|תחייגי|לחייג|שיחה|לדבר)( עם| אל)?( ל)? ?"), "").trim()
-            .ifBlank { texts.firstOrNull().orEmpty() }
-        when(matches.size) {
-            0 -> respond("לא נמצא איש קשר בשם $displayQuery", false)
-            1 -> requestCall(matches.single())
-            else -> { callChoices = matches; respond("נמצאו ${matches.size} אנשי קשר עבור $displayQuery. לחצו על השם הרצוי") }
+        viewModelScope.launch {
+            val matches = precomputedMatches ?: withContext(Dispatchers.Default) { matchPeople(texts) }
+            when(matches.size) {
+                0 -> {
+                    callChoices = emptyList()
+                    respond("לא נמצא איש קשר בשם $displayQuery", false)
+                }
+                1 -> {
+                    callChoices = matches
+                    requestCall(matches.single())
+                }
+                else -> {
+                    callChoices = matches
+                    respond("נמצאו ${matches.size} אנשי קשר עבור $displayQuery. לחצו על השם הרצוי")
+                }
+            }
         }
     }
 

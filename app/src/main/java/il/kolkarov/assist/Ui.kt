@@ -148,9 +148,18 @@ enum class SettingsArea(val label: String) {
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    LaunchedEffect(m.voiceSearchQuery) {
+        if (m.voiceSearchQuery.isNotBlank()) {
+            callFilter = m.voiceSearchQuery
+            debouncedQuery = m.voiceSearchQuery
+            selectedLetter = null
+        }
+    }
     LaunchedEffect(callFilter) {
         if (callFilter.isBlank()) {
             debouncedQuery = ""
+        } else if (callFilter == m.voiceSearchQuery) {
+            debouncedQuery = callFilter
         } else {
             delay(800)
             debouncedQuery = callFilter
@@ -329,7 +338,16 @@ enum class SettingsArea(val label: String) {
                         icon = Icons.Default.Mic,
                         enabled = !m.busy,
                         active = m.listening,
-                        onClick = { keyboard?.hide(); focusManager.clearFocus(); listen() }
+                        onClick = {
+                            callFilter = ""
+                            debouncedQuery = ""
+                            selectedLetter = null
+                            m.callChoices = emptyList()
+                            m.voiceSearchQuery = ""
+                            keyboard?.hide()
+                            focusManager.clearFocus()
+                            listen()
+                        }
                     )
                     if (p.enablePhoneContacts && !m.deviceContacts.allowed()) {
                         Action("אישור גישה לאנשי הקשר בטלפון", Icons.Default.Contacts, secondary = true, onClick = requestContacts)
@@ -338,7 +356,7 @@ enum class SettingsArea(val label: String) {
                     // Search Field with Clear and Hide Keyboard buttons
                     OutlinedTextField(
                         value = callFilter,
-                        onValueChange = { callFilter = it; selectedLetter = null; m.callChoices = emptyList(); m.answer = "" },
+                        onValueChange = { callFilter = it; selectedLetter = null; m.callChoices = emptyList(); m.voiceSearchQuery = ""; m.answer = "" },
                         modifier = Modifier.fillMaxWidth().onFocusChanged { searchFocused = it.isFocused },
                         label = { Text("חיפוש לפי שם") },
                         singleLine = true,
@@ -349,7 +367,7 @@ enum class SettingsArea(val label: String) {
                         trailingIcon = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (callFilter.isNotEmpty() || selectedLetter != null || m.callChoices.isNotEmpty()) {
-                                    IconButton({ callFilter = ""; debouncedQuery = ""; selectedLetter = null; m.callChoices = emptyList(); m.answer = "" }) {
+                                    IconButton({ callFilter = ""; debouncedQuery = ""; selectedLetter = null; m.callChoices = emptyList(); m.voiceSearchQuery = ""; m.answer = "" }) {
                                         Icon(Icons.Default.Clear, contentDescription = "נקה חיפוש")
                                     }
                                 }
@@ -383,7 +401,7 @@ enum class SettingsArea(val label: String) {
                     ) {
                         FilterChip(
                             selected = selectedLetter == null && callFilter.isBlank() && m.callChoices.isEmpty(),
-                            onClick = { selectedLetter = null; callFilter = ""; debouncedQuery = ""; m.callChoices = emptyList(); m.answer = ""; keyboard?.hide(); focusManager.clearFocus() },
+                            onClick = { selectedLetter = null; callFilter = ""; debouncedQuery = ""; m.callChoices = emptyList(); m.voiceSearchQuery = ""; m.answer = ""; keyboard?.hide(); focusManager.clearFocus() },
                             label = { Text("הכל", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold) }
                         )
                         FilterChip(
@@ -400,6 +418,7 @@ enum class SettingsArea(val label: String) {
                                     callFilter = ""
                                     debouncedQuery = ""
                                     m.callChoices = emptyList()
+                                    m.voiceSearchQuery = ""
                                     m.answer = ""
                                     keyboard?.hide()
                                     focusManager.clearFocus()
@@ -420,6 +439,7 @@ enum class SettingsArea(val label: String) {
                                 debouncedQuery = ""
                                 selectedLetter = null
                                 m.callChoices = emptyList()
+                                m.voiceSearchQuery = ""
                                 m.answer = ""
                                 keyboard?.hide()
                                 focusManager.clearFocus()
@@ -440,17 +460,18 @@ enum class SettingsArea(val label: String) {
                         }
                     }
                     val filtered = remember(indexedCallable, debouncedQuery, selectedLetter, m.callChoices) {
-                        if (m.callChoices.isNotEmpty()) m.callChoices
-                        else if (selectedLetter != null) {
+                        if (selectedLetter != null) {
                             val l = selectedLetter!!.lowercase()
                             indexedCallable.filter { (_, words, _) -> words.any { it.startsWith(l) } }.map { it.first }
-                        } else if (debouncedQuery.isBlank()) {
+                        } else if (debouncedQuery.isBlank() && m.callChoices.isEmpty()) {
                             allCallable
                         } else {
                             val q = normalized(debouncedQuery)
-                            val directMatches = indexedCallable.filter { (_, _, blob) -> blob.contains(q) }.map { it.first }
-                            val phoneticMatches = m.matchPeople(listOf(debouncedQuery), allCallable)
-                            (directMatches + phoneticMatches).distinctBy { it.id }
+                            val directMatches = if (q.isNotBlank()) indexedCallable.filter { (_, _, blob) -> blob.contains(q) }.map { it.first } else emptyList()
+                            val phoneticMatches = if (debouncedQuery.isNotBlank()) m.matchPeople(listOf(debouncedQuery), allCallable) else emptyList()
+                            (m.callChoices + directMatches + phoneticMatches)
+                                .distinctBy { it.id }
+                                .sortedWith(compareByDescending<Person> { it.favorite }.thenBy { it.name.lowercase() })
                         }
                     }
 
@@ -512,7 +533,7 @@ enum class SettingsArea(val label: String) {
                     }
                 }
                 Screen.SETTINGS -> {
-                    Heading("הגדרות למשפחה (גרסה 0.8)")
+                    Heading("הגדרות למשפחה (גרסה 0.9)")
                     if(settingsArea==null) {
                         Text("בחרו מה להגדיר:")
                         SettingsArea.entries.forEach { area -> Action(area.label,Icons.Default.ChevronLeft,secondary=area!=SettingsArea.FEATURES) { settingsArea=area } }
