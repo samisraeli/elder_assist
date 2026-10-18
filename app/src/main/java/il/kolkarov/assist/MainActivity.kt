@@ -139,7 +139,12 @@ class MainActivity : ComponentActivity() {
         runCatching { startActivity(Intent(if(direct) Intent.ACTION_CALL else Intent.ACTION_DIAL,Uri.fromParts("tel",person.phone,null))) }
             .onFailure { runCatching { startActivity(Intent(Intent.ACTION_DIAL,Uri.fromParts("tel",person.phone,null))) }.onFailure { model.status = "אין יישום חיוג זמין במכשיר" } }
     }
-    override fun onResume() { super.onResume(); if(::speech.isInitialized) model.output=speech; model.refreshNotices(); model.loadAgenda(); model.loadCalendars(); model.loadPhoneContacts() }
+    override fun onResume() {
+        super.onResume()
+        if(::speech.isInitialized) model.output = speech
+        if(::input.isInitialized && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) input.warmUp()
+        model.refreshNotices(); model.loadAgenda(); model.loadCalendars(); model.loadPhoneContacts()
+    }
     override fun onStop() {
         super.onStop()
         if(::input.isInitialized) input.cancel()

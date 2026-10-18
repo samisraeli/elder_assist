@@ -73,5 +73,12 @@ class DomainTest {
         assertTrue(words.contains("eladush"))
         assertTrue(words.contains("אלעדוש"))
         assertTrue(words.any { it.startsWith("אלעד") })
+
+        val person = Person(id = "1", name = "Jessica WOW", aliases = "ג'סיקה, גסי", phone = "0509998877", favorite = true)
+        val indexed = person.indexed()
+        assertTrue(indexed.words.contains("jessica"))
+        assertTrue(indexed.words.contains("גסיקה"))
+        assertTrue(indexed.wordSkeletons.contains(phoneticSkeleton("ג'סיקה")))
+        assertTrue(indexed.searchBlob.contains("0509998877"))
     }
 }

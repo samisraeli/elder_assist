@@ -25,13 +25,46 @@ data class Place(val name: String, val country: String, val latitude: Double, va
 data class Weather(val text: String, val fetched: Instant)
 data class NewsResult(val items: List<NewsItem>, val warnings: List<String>, val fetched: Instant)
 
+private val INVISIBLE_AND_NIQQUD_REGEX = Regex("[\\u0591-\\u05C7\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF]")
+private val PUNCTUATION_REGEX = Regex("[\"׳״'’`?!.,]")
+private val WHITESPACE_REGEX = Regex("\\s+")
+private val WORD_TOKEN_REGEX = Regex("[א-ת]+|[a-z0-9]+")
+private val REPEATED_CHAR_REGEX = Regex("(.)\\1+")
+
+data class IndexedPerson(
+    val person: Person,
+    val names: List<String>,
+    val fullText: String,
+    val words: List<String>,
+    val wordSkeletons: List<String>,
+    val searchBlob: String
+)
+
+fun Person.indexed(): IndexedPerson {
+    val cleanNames = (listOf(name) + aliases.split(',', ';'))
+        .map { normalized(it) }
+        .filter { it.isNotBlank() }
+    val fullText = cleanNames.joinToString(" ")
+    val words = cleanNames.flatMap { extractWords(it) }.distinct()
+    val wordSkeletons = words.map { phoneticSkeleton(it) }.filter { it.isNotBlank() }.distinct()
+    val searchBlob = (words + listOf(fullText, phone)).joinToString(" ")
+    return IndexedPerson(
+        person = this,
+        names = cleanNames,
+        fullText = fullText,
+        words = words,
+        wordSkeletons = wordSkeletons,
+        searchBlob = searchBlob
+    )
+}
+
 fun normalized(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFKC)
-    .replace(Regex("[\\u0591-\\u05C7\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF]"), "")
-    .replace(Regex("[\"׳״'’`?!.,]"), "")
-    .trim().lowercase().replace(Regex("\\s+"), " ")
+    .replace(INVISIBLE_AND_NIQQUD_REGEX, "")
+    .replace(PUNCTUATION_REGEX, "")
+    .trim().lowercase().replace(WHITESPACE_REGEX, " ")
 
 fun extractWords(value: String): List<String> =
-    Regex("[א-ת]+|[a-z0-9]+").findAll(normalized(value)).map { it.value }.filter { it.isNotBlank() }.toList()
+    WORD_TOKEN_REGEX.findAll(normalized(value)).map { it.value }.filter { it.isNotBlank() }.toList()
 
 fun phoneticSkeleton(word: String): String {
     val w = normalized(word)
@@ -64,20 +97,21 @@ fun phoneticSkeleton(word: String): String {
             c == 'פ' || c == 'ף' -> sb.append('p')
             c == 'צ' || c == 'ץ' -> sb.append('z')
             c == 'ר' -> sb.append('r')
-            c in listOf('a', 'e', 'i', 'o', 'u') -> if (sb.isEmpty()) sb.append('a')
+            c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u' -> if (sb.isEmpty()) sb.append('a')
             c == 'c' || c == 'q' || c == 'k' -> sb.append('k')
             c == 'j' || c == 'g' -> sb.append('g')
             c == 'v' || c == 'w' -> sb.append('v')
             c == 'f' || c == 'p' -> sb.append('p')
             c == 'y' -> if (sb.isEmpty()) sb.append('y')
-            c == 'z' || c == 's' -> sb.append('s').let { if (c == 'z') { sb.setCharAt(sb.length - 1, 'z') } }
+            c == 'z' -> sb.append('z')
+            c == 's' -> sb.append('s')
             c == 'x' -> sb.append("ks")
             c in 'a'..'z' -> sb.append(c)
             c in '0'..'9' -> sb.append(c)
         }
         i++
     }
-    return sb.toString().replace(Regex("(.)\\1+"), "$1")
+    return sb.toString().replace(REPEATED_CHAR_REGEX, "$1")
 }
 
 fun nextBirthday(month: Int, day: Int, today: LocalDate): LocalDate {
@@ -103,6 +137,9 @@ sealed interface Command {
 }
 
 object CommandParser {
+    private val CALL_VERB_PREFIX = Regex("^(התקשר|תתקשר|התקשרי|תתקשרי|להתקשר|חייג|תחייג|חייגי|תחייגי|לחייג|שיחה|לדבר|טלפן|תטלפן)( עם| אל| ל)? ?")
+    private val CALL_VERB_STRIP = Regex("^(התקשר|תתקשר|התקשרי|תתקשרי|להתקשר|חייג|תחייג|חייגי|תחייגי|לחייג|שיחה|לדבר|טלפן|תטלפן)( עם| אל)?( ל)? ?")
+
     fun parse(raw: String, now: LocalDateTime = LocalDateTime.now()): Command {
         val s = normalized(raw)
         return when {
@@ -116,8 +153,8 @@ object CommandParser {
             s.startsWith("בטל תזכורת") || s.startsWith("מחק תזכורת") ->
                 Command.CancelReminder(s.substringAfter("תזכורת").trim())
             s.startsWith("תזכיר") -> reminder(s, now)
-            Regex("^(התקשר|תתקשר|התקשרי|תתקשרי|להתקשר|חייג|תחייג|חייגי|תחייגי|לחייג|שיחה)( עם| אל| ל)? ?").containsMatchIn(s) -> {
-                val name = s.replaceFirst(Regex("^(התקשר|תתקשר|התקשרי|תתקשרי|להתקשר|חייג|תחייג|חייגי|תחייגי|לחייג|שיחה)( עם| אל)?( ל)? ?"), "").trim()
+            CALL_VERB_PREFIX.containsMatchIn(s) -> {
+                val name = s.replaceFirst(CALL_VERB_STRIP, "").trim()
                 if (name.isEmpty()) Command.Clarify("למי להתקשר? אמרו למשל: התקשר לשלום") else Command.Call(name)
             }
             s.contains("חדשות") || s.contains("ספורט") || s.contains("בידור") || s.contains("תרבות") ->

@@ -67,7 +67,18 @@ class VoiceInput(
     private val handler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
     private var inFlight = false
+    private var isClosed = false
     private var generation = 0
+    private var lastPartial: List<String> = emptyList()
+
+    fun warmUp() {
+        if (isClosed) return
+        handler.post {
+            if (!isClosed && recognizer == null && !inFlight && runCatching { recognitionAvailable() }.getOrDefault(false)) {
+                runCatching { recognizer = recognizerFactory() }
+            }
+        }
+    }
 
     private fun obtainRecognizer(): SpeechRecognizer {
         val existing = recognizer
@@ -99,12 +110,23 @@ class VoiceInput(
             handler.post {
                 if (rec === recognizer) inFlight = false
                 if (session != generation || rec !== recognizer) return@post
+                val partialFallback = lastPartial.filter { it.isNotBlank() }
+                lastPartial = emptyList()
                 onListening(false)
+                if (partialFallback.isNotEmpty() && (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == SpeechRecognizer.ERROR_SERVER)) {
+                    onProcessing(true)
+                    result(partialFallback)
+                    return@post
+                }
                 onProcessing(false)
                 if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
                     runCatching { rec.cancel() }
                 }
                 if (error == SpeechRecognizer.ERROR_CLIENT || error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS || error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == 11 || error == 12 || error == 13) {
+                    // Retire broken/busy recognizer instance so next attempt gets a fresh service binding
+                    recognizer = null
+                    runCatching { rec.setRecognitionListener(null) }
+                    handler.postDelayed({ runCatching { rec.destroy() } }, 400)
                     fallbackDialog(buildIntent(lastLanguage))
                     return@post
                 }
@@ -120,17 +142,27 @@ class VoiceInput(
             handler.post {
                 if (rec === recognizer) inFlight = false
                 if (session != generation || rec !== recognizer) return@post
+                val finalCandidates = if (list.isNotEmpty()) list else lastPartial.filter { it.isNotBlank() }
+                lastPartial = emptyList()
                 onListening(false)
-                if (list.isEmpty()) {
+                if (finalCandidates.isEmpty()) {
                     onProcessing(false)
                     state("לא שמעתי בבירור")
                 } else {
                     onProcessing(true)
-                    result(list)
+                    result(finalCandidates)
                 }
             }
         }
-        override fun onPartialResults(partialResults: Bundle?) {}
+        override fun onPartialResults(partialResults: Bundle?) {
+            val list = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.filter { it.isNotBlank() }.orEmpty()
+            if (list.isEmpty()) return
+            handler.post {
+                if (session != generation || rec !== recognizer) return@post
+                lastPartial = list
+                state("שומע: ${list.first()}…")
+            }
+        }
         override fun onEvent(eventType: Int, params: Bundle?) {}
     }
 
@@ -139,13 +171,18 @@ class VoiceInput(
         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
         putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language)
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 900L)
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
         putExtra(RecognizerIntent.EXTRA_PROMPT, "דברו עכשיו...")
     }
 
     fun listen(language: String) {
+        if (isClosed) return
         lastLanguage = language
         val session = ++generation
+        lastPartial = emptyList()
         val speechIntent = buildIntent(language)
         if (!recognitionAvailable()) {
             onListening(false)
@@ -157,14 +194,18 @@ class VoiceInput(
         onListening(true)
         state("מקשיב… דברו עכשיו")
         handler.post {
-            if (session != generation) return@post
+            if (isClosed || session != generation) return@post
             runCatching {
                 val rec = obtainRecognizer()
                 inFlight = true
                 rec.setRecognitionListener(listenerForSession(session, rec))
                 rec.startListening(speechIntent)
             }.onFailure {
+                val broken = recognizer
+                recognizer = null
                 inFlight = false
+                runCatching { broken?.setRecognitionListener(null) }
+                handler.postDelayed({ runCatching { broken?.destroy() } }, 400)
                 if (session == generation) {
                     onListening(false)
                     onProcessing(false)
@@ -176,6 +217,7 @@ class VoiceInput(
 
     fun cancel() {
         generation++
+        lastPartial = emptyList()
         onListening(false)
         onProcessing(false)
         handler.post {
@@ -191,7 +233,9 @@ class VoiceInput(
     }
 
     fun close() {
+        isClosed = true
         generation++
+        lastPartial = emptyList()
         onListening(false)
         onProcessing(false)
         handler.post {

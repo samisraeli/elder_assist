@@ -34,7 +34,10 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
     var confirmation by mutableStateOf<Confirmation?>(null)
     var callChoices by mutableStateOf<List<Person>>(emptyList())
     var voiceSearchQuery by mutableStateOf("")
+    var callFilter by mutableStateOf("")
+    var selectedLetter by mutableStateOf<String?>(null)
     var phonePeople by mutableStateOf<List<Person>>(emptyList())
+    var indexedCallable by mutableStateOf<List<IndexedPerson>>(emptyList())
     var agenda by mutableStateOf<List<AgendaItem>>(emptyList())
     var newsResult by mutableStateOf<NewsResult?>(null)
     var topic by mutableStateOf(Topic.GENERAL)
@@ -45,6 +48,8 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
     private var task: Job? = null
     private var searchJob: Job? = null
     private var profileSaveJob: Job? = null
+    private var indexJob: Job? = null
+    private var phoneLoadJob: Job? = null
     var output: SpeechOutput? = null
     var dial: (Person) -> Unit = {}
     private var lastWeather: Weather? = null
@@ -56,24 +61,60 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
                 runCatching { agenda = agendaNow(); NoticeScheduler(app).refresh() }
             }
         }
+        viewModelScope.launch {
+            combine(
+                profile.map { it.enablePhoneContacts }.distinctUntilChanged(),
+                people
+            ) { _, _ -> Unit }.collectLatest {
+                rebuildContactIndex()
+            }
+        }
     }
 
-    fun allCallablePeople(): List<Person> {
-        val localWithPhone = people.value.filter { it.phone.isNotBlank() }
-        val combined = if (!profile.value.enablePhoneContacts) {
+    private fun rebuildContactIndex() {
+        indexJob?.cancel()
+        val localSnapshot = people.value
+        val phoneSnapshot = phonePeople
+        val includePhone = profile.value.enablePhoneContacts
+        indexJob = viewModelScope.launch(Dispatchers.Default) {
+            val combined = buildCallablePeople(localSnapshot, phoneSnapshot, includePhone)
+            val indexed = combined.map { it.indexed() }
+            withContext(Dispatchers.Main) {
+                indexedCallable = indexed
+            }
+        }
+    }
+
+    private fun buildCallablePeople(
+        localList: List<Person>,
+        phoneList: List<Person>,
+        includePhone: Boolean
+    ): List<Person> {
+        val localWithPhone = localList.filter { it.phone.isNotBlank() }
+        val combined = if (!includePhone) {
             localWithPhone
         } else {
             val seen = localWithPhone.map { "${normalized(it.name)}|${it.phone}" }.toMutableSet()
-            val extra = phonePeople.filter { it.phone.isNotBlank() && seen.add("${normalized(it.name)}|${it.phone}") }
+            val extra = phoneList.filter { it.phone.isNotBlank() && seen.add("${normalized(it.name)}|${it.phone}") }
             localWithPhone + extra
         }
         return combined.sortedWith(compareByDescending<Person> { it.favorite }.thenBy { it.name.lowercase() })
     }
 
+    fun allCallablePeople(): List<Person> {
+        val currentIndexed = indexedCallable
+        if (currentIndexed.isNotEmpty()) return currentIndexed.map { it.person }
+        return buildCallablePeople(people.value, phonePeople, profile.value.enablePhoneContacts)
+    }
+
     fun loadPhoneContacts() {
-        viewModelScope.launch(Dispatchers.IO) {
+        phoneLoadJob?.cancel()
+        phoneLoadJob = viewModelScope.launch(Dispatchers.IO) {
             val loaded = runCatching { deviceContacts.load() }.getOrDefault(emptyList())
-            withContext(Dispatchers.Main) { phonePeople = loaded }
+            withContext(Dispatchers.Main) {
+                phonePeople = loaded
+                rebuildContactIndex()
+            }
         }
     }
 
@@ -107,9 +148,9 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         confirmation = null; output?.stop()
         runTask { pending.action() }
     }
-    fun cancel() { task?.cancel(); searchJob?.cancel(); confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; listening = false; processingVoice = false; output?.stop(); status = "מוכן להקשיב" }
+    fun cancel() { task?.cancel(); searchJob?.cancel(); confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; callFilter = ""; selectedLetter = null; listening = false; processingVoice = false; output?.stop(); status = "מוכן להקשיב" }
     fun navigate(to: Screen) {
-        searchJob?.cancel(); confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; listening = false; processingVoice = false; output?.stop()
+        searchJob?.cancel(); confirmation = null; callChoices = emptyList(); voiceSearchQuery = ""; callFilter = ""; selectedLetter = null; listening = false; processingVoice = false; output?.stop()
         answer = ""; spokenAnswer = false; status = "מוכן להקשיב"
         screen = to
         if (to == Screen.AGENDA) loadAgenda()
@@ -118,11 +159,22 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
     }
 
     private val callVerbRegex = Regex("^(התקשר|תתקשר|התקשרי|תתקשרי|להתקשר|חייג|תחייג|חייגי|תחייגי|לחייג|שיחה|לדבר|טלפן|תטלפן)( עם| אל)?( ל)? ?")
+    private val callPrepositionRegex = Regex("^(עם |אל |ל )")
 
-    fun matchPeople(rawQueries: List<String>, candidates: List<Person> = allCallablePeople()): List<Person> {
+    fun matchPeople(rawQueries: List<String>, candidates: List<Person>? = null): List<Person> {
+        val indexedList = if (candidates != null) {
+            val byId = indexedCallable.associateBy { it.person.id }
+            candidates.map { byId[it.id] ?: it.indexed() }
+        } else {
+            indexedCallable.ifEmpty { allCallablePeople().map { it.indexed() } }
+        }
+        return matchIndexedPeople(rawQueries, indexedList)
+    }
+
+    fun matchIndexedPeople(rawQueries: List<String>, indexedCandidates: List<IndexedPerson> = indexedCallable): List<Person> {
         val baseQueries = rawQueries.map {
             normalized(it).replaceFirst(callVerbRegex, "")
-                .replace(Regex("^(עם |אל |ל )"), "").trim()
+                .replace(callPrepositionRegex, "").trim()
         }.filter { it.isNotBlank() }
 
         // Expand queries to handle Hebrew 'ל' prefix ("לאלעד" -> "אלעד", and if speech dropped 'א'/'ע' after 'ל': "לעד" -> "אלעד"/"עלעד")
@@ -141,11 +193,12 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
             Triple(q, qWords, qSkel to qWordSkels)
         }
 
-        val scored = candidates.mapNotNull { p ->
-            val names = (listOf(p.name) + p.aliases.split(',', ';')).map { normalized(it) }.filter { it.isNotBlank() }
-            val fullText = names.joinToString(" ")
-            val words = names.flatMap { extractWords(it) }.distinct()
-            val wordSkeletons = words.map { phoneticSkeleton(it) }.filter { it.isNotBlank() }
+        val scored = indexedCandidates.mapNotNull { item ->
+            val p = item.person
+            val names = item.names
+            val fullText = item.fullText
+            val words = item.words
+            val wordSkeletons = item.wordSkeletons
             var bestScore = 0
             for ((q, qWords, skels) in preparedQueries) {
                 val (qSkel, qWordSkels) = skels
@@ -283,7 +336,7 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
     fun findCallFromCandidates(texts: List<String>, precomputedMatches: List<Person>? = null) {
         val rawCleaned = normalized(texts.firstOrNull().orEmpty())
             .replaceFirst(callVerbRegex, "")
-            .replace(Regex("^(עם |אל |ל )"), "").trim()
+            .replace(callPrepositionRegex, "").trim()
             .ifBlank { texts.firstOrNull().orEmpty().trim() }
         val displayQuery = if (rawCleaned.startsWith("ל") && rawCleaned.length >= 3 && texts.firstOrNull()?.contains(Regex("התקשר|תתקשר|חייג|תחייג|שיחה|לדבר|טלפן")) == true) {
             rawCleaned.drop(1).trim()
@@ -292,10 +345,16 @@ class CompanionModel(application: Application) : AndroidViewModel(application) {
         }
         processingVoice = true
         status = "מחפש את $displayQuery..."
+        selectedLetter = null
+        voiceSearchQuery = displayQuery
+        callFilter = displayQuery
+        callChoices = emptyList()
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             val matches = precomputedMatches ?: withContext(Dispatchers.Default) { matchPeople(texts) }
             voiceSearchQuery = displayQuery
+            callFilter = displayQuery
+            selectedLetter = null
             callChoices = matches
             processingVoice = false
             status = "שמעתי: ${texts.firstOrNull().orEmpty()}"
